@@ -4,6 +4,9 @@ let resumeText = '';
 let session = null; // { mode, company, role, jd, startedAt, qa: [], transcript: [] }
 let liveSeconds = 0, liveTimerId = null;
 let recognition = null, micStream = null, tabStream = null, mediaRecorder = null;
+let micRecorder = null;
+let sysStream = null, sysRecorder = null;
+let whisperBusy = false, whisperQueue = [], lastWhisperText = '', noKeyWarned = false;
 let mock = { topic: '', idx: 0, questions: [], answers: [] };
 
 const $ = (id) => document.getElementById(id);
@@ -126,9 +129,74 @@ $('btnAsk').addEventListener('click', () => { const q = $('qInput').value.trim()
 $('qInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnAsk').click(); });
 document.querySelectorAll('.demo-q').forEach((b) => b.addEventListener('click', () => answerQuestion(b.dataset.q)));
 
-// Mic: browser speech recognition (Chrome) as a no-key transcription path
+// ---------- audio engine: any source -> Whisper transcription ----------
+// Electron's Chromium has NO SpeechRecognition (no Google speech service),
+// so the mic cannot use it here at all. All audio goes through Groq
+// Whisper in 5-second chunks (free Groq key in Settings). SpeechRecognition
+// is kept only as a bonus fast path if this Chromium ever provides it.
+function audioStatus(text) { const el = $('audioStatus'); if (el) el.textContent = text; }
+function langCode() { return ({ en: 'en', hi: 'hi', hinglish: 'hi' })[session?.language || settings.language] || 'en'; }
+function pickMimeType() {
+  for (const m of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', '']) {
+    if (!m) return '';
+    try { if (MediaRecorder.isTypeSupported(m)) return m; } catch {}
+  }
+  return '';
+}
+function blobToBase64(blob) {
+  return blob.arrayBuffer().then((b) => { let s = ''; const u = new Uint8Array(b); for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(s); });
+}
+async function pumpWhisperQueue() {
+  if (whisperBusy) return;
+  whisperBusy = true;
+  while (whisperQueue.length) {
+    const { blob, label, mime } = whisperQueue.shift();
+    if (!settings.groqKey) {
+      if (!noKeyWarned) { noKeyWarned = true; addTranscript('Audio needs a free Groq key for transcription — add it in Settings (console.groq.com → API Keys), then restart capture.', false); }
+      continue;
+    }
+    const r = await window.api.groqTranscribe({ key: settings.groqKey, base64: await blobToBase64(blob), mime: mime || 'audio/webm' });
+    if (!r.ok) { addTranscript(`Transcription error: ${r.error}`, false); continue; }
+    const t = (r.text || '').trim();
+    if (!t || t.length < 2 || t === lastWhisperText) continue; // skip silence / repeats
+    lastWhisperText = t;
+    addTranscript(`${label}: ${t}`, window.isQuestion(t));
+    audioStatus(`🎧 Last heard ${new Date().toLocaleTimeString()} — ${label}`);
+    if (window.isQuestion(t) && $('autoAnswer').checked) answerQuestion(t);
+  }
+  whisperBusy = false;
+}
+function startWhisperRecorder(stream, label) {
+  // Record AUDIO ONLY — recording the whole display stream (video+audio)
+  // as "audio/webm" produced unusable files, which is why tab audio
+  // transcribed nothing before.
+  const audioOnly = new MediaStream(stream.getAudioTracks());
+  if (!audioOnly.getAudioTracks().length) return null;
+  const mime = pickMimeType();
+  let rec;
+  try { rec = new MediaRecorder(audioOnly, mime ? { mimeType: mime } : undefined); } catch { return null; }
+  rec.ondataavailable = (e) => { if (e.data && e.data.size > 1000) { whisperQueue.push({ blob: e.data, label, mime: rec.mimeType }); pumpWhisperQueue(); } };
+  rec.onerror = () => { audioStatus(`⚠️ ${label} recorder error — restart capture.`); };
+  try { rec.start(5000); } catch { return null; } // 5-second chunks
+  return rec;
+}
+function stopRecorder(rec) { try { if (rec && rec.state !== 'inactive') rec.stop(); } catch {} }
+function stopAllAudio() {
+  recognition?.stop(); recognition = null;
+  stopRecorder(mediaRecorder); mediaRecorder = null;
+  stopRecorder(micRecorder); micRecorder = null;
+  stopRecorder(sysRecorder); sysRecorder = null;
+  tabStream?.getTracks().forEach((t) => t.stop()); tabStream = null;
+  micStream?.getTracks().forEach((t) => t.stop()); micStream = null;
+  sysStream?.getTracks().forEach((t) => t.stop()); sysStream = null;
+  $('btnMic').textContent = '🎙️ Mic: off';
+  $('btnTabAudio').textContent = '🖥️ Capture Meet / Zoom tab audio';
+  $('btnSysAudio').textContent = '🔊 System audio (Zoom app)';
+}
+
+// Mic: SpeechRecognition if present, otherwise Whisper (the normal case in Electron)
 $('btnMic').addEventListener('click', async () => {
-  if (recognition) { recognition.stop(); recognition = null; $('btnMic').textContent = '🎙️ Mic: off'; return; }
+  if (recognition || micRecorder) { recognition?.stop(); recognition = null; stopRecorder(micRecorder); micRecorder = null; micStream?.getTracks().forEach((t) => t.stop()); micStream = null; $('btnMic').textContent = '🎙️ Mic: off'; audioStatus('Mic stopped.'); return; }
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -137,33 +205,69 @@ $('btnMic').addEventListener('click', async () => {
       recognition.lang = (session?.language || 'en') === 'hi' ? 'hi-IN' : 'en-US';
       recognition.onresult = (e) => {
         const last = e.results[e.results.length - 1];
-        if (last.isFinal) { const text = last[0].transcript.trim(); addTranscript(text, window.isQuestion(text)); if (window.isQuestion(text) && $('autoAnswer').checked) answerQuestion(text); }
+        if (last.isFinal) { const text = last[0].transcript.trim(); if (text) { addTranscript(text, window.isQuestion(text)); if (window.isQuestion(text) && $('autoAnswer').checked) answerQuestion(text); } }
       };
+      recognition.onend = () => { if (micStream) { try { recognition.start(); } catch {} } }; // Chrome stops after pauses
+      recognition.onerror = (e) => { if (e.error === 'not-allowed') { addTranscript('Mic blocked — allow microphone access and retry.', false); stopAllAudio(); } };
       recognition.start();
       $('btnMic').textContent = '🎙️ Mic: listening… (click to stop)';
+      audioStatus('🎙️ Mic on — listening…');
     } else {
-      addTranscript('Speech recognition not available in this build — type the question, or add a Groq key and use tab-audio Whisper.', false);
-      micStream.getTracks().forEach((t) => t.stop());
+      // Electron has no SpeechRecognition — this is the expected path here.
+      if (!settings.groqKey) { addTranscript('Mic transcription needs a free Groq key in Settings — Electron has no built-in speech recognition. Add the key, then start the mic again.', false); micStream.getTracks().forEach((t) => t.stop()); micStream = null; return; }
+      micRecorder = startWhisperRecorder(micStream, 'You');
+      if (!micRecorder) { addTranscript('Mic recorder could not start in this build.', false); return; }
+      $('btnMic').textContent = '🎙️ Mic: listening (Whisper)… (click to stop)';
+      addTranscript('Mic listening (Whisper)… speak and the transcript will appear in ~5 second chunks.', false);
+      audioStatus('🎙️ Mic on (Whisper) — listening…');
     }
   } catch (err) { addTranscript(`Mic error: ${err.message}. Allow microphone access and retry.`, false); }
 });
 
-// Tab audio: capture a Meet / Zoom browser tab (audio only), Whisper via Groq when key set
+// Tab audio: capture a Meet / Zoom browser tab, transcribe it with Whisper
 $('btnTabAudio').addEventListener('click', async () => {
+  if (tabStream) { stopRecorder(mediaRecorder); mediaRecorder = null; tabStream.getTracks().forEach((t) => t.stop()); tabStream = null; $('btnTabAudio').textContent = '🖥️ Capture Meet / Zoom tab audio'; audioStatus('Tab audio stopped.'); return; }
   try {
     tabStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    const audioTracks = tabStream.getAudioTracks();
+    if (!audioTracks.length) {
+      addTranscript('This capture has NO audio track — pick the Meet/Zoom tab again and tick “Share audio”. (If the tab has no sound, there is nothing to transcribe.)', false);
+      tabStream.getTracks().forEach((t) => t.stop()); tabStream = null;
+      return;
+    }
     addTranscript('Tab capture started — share the Google Meet / Zoom tab (tick “Share audio”). Video is used only to pick the tab; it is never uploaded.', false);
-    if (!settings.groqKey) { addTranscript('No Groq key: tab audio cannot be transcribed yet. Add a key in Settings, or use Mic / type the question.', false); return; }
-    mediaRecorder = new MediaRecorder(tabStream, { mimeType: 'audio/webm' });
-    mediaRecorder.ondataavailable = async (e) => {
-      if (!e.data.size) return;
-      const b64 = await e.data.arrayBuffer().then((b) => { let s = ''; const u = new Uint8Array(b); for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(s); });
-      const r = await window.api.groqTranscribe({ key: settings.groqKey, base64: b64, mime: 'audio/webm' });
-      if (r.ok && r.text.trim()) { const t = r.text.trim(); addTranscript(t, window.isQuestion(t)); if (window.isQuestion(t) && $('autoAnswer').checked) answerQuestion(t); }
-    };
-    mediaRecorder.start(8000); // 8-second Whisper chunks
-    tabStream.getVideoTracks()[0]?.addEventListener('ended', () => { mediaRecorder?.stop(); addTranscript('Tab capture stopped.', false); });
+    if (!settings.groqKey) { addTranscript('No Groq key: tab audio cannot be transcribed yet. Add a key in Settings, then restart capture.', false); return; }
+    mediaRecorder = startWhisperRecorder(tabStream, 'Interviewer');
+    if (!mediaRecorder) { addTranscript('Tab audio recorder could not start in this build.', false); return; }
+    $('btnTabAudio').textContent = '🖥️ Tab audio live… (click to stop)';
+    audioStatus('🔊 Tab audio live — transcribing the interviewer…');
+    tabStream.getVideoTracks()[0]?.addEventListener('ended', () => { stopRecorder(mediaRecorder); mediaRecorder = null; tabStream = null; $('btnTabAudio').textContent = '🖥️ Capture Meet / Zoom tab audio'; addTranscript('Tab capture stopped.', false); });
   } catch (err) { addTranscript(`Tab capture cancelled / failed: ${err.message}`, false); }
+});
+
+// System audio: whole-computer sound (Zoom desktop app) via screen loopback
+$('btnSysAudio').addEventListener('click', async () => {
+  if (sysStream) { stopRecorder(sysRecorder); sysRecorder = null; sysStream.getTracks().forEach((t) => t.stop()); sysStream = null; $('btnSysAudio').textContent = '🔊 System audio (Zoom app)'; audioStatus('System audio stopped.'); return; }
+  if (!settings.groqKey) { addTranscript('System audio needs a Groq key for transcription — add it in Settings first.', false); return; }
+  try {
+    const sources = await window.api.captureSources();
+    const screen = sources.find((s) => s.id.startsWith('screen:'));
+    if (!screen) { addTranscript('No screen source found for system audio.', false); return; }
+    sysStream = await navigator.mediaDevices.getUserMedia({
+      audio: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: screen.id } },
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: screen.id, maxWidth: 1, maxHeight: 1 } },
+    });
+    if (!sysStream.getAudioTracks().length) {
+      addTranscript('System audio loopback gave no audio track on this machine — use the Meet/Zoom tab capture instead, or a virtual audio cable (see README).', false);
+      sysStream.getTracks().forEach((t) => t.stop()); sysStream = null;
+      return;
+    }
+    sysRecorder = startWhisperRecorder(sysStream, 'Interviewer');
+    if (!sysRecorder) { addTranscript('System audio recorder could not start in this build.', false); return; }
+    $('btnSysAudio').textContent = '🔊 System audio live… (click to stop)';
+    addTranscript('System audio live — the Zoom app’s sound is being transcribed in ~5 second chunks.', false);
+    audioStatus('🔊 System audio live — transcribing…');
+  } catch (err) { addTranscript(`System audio failed: ${err.message}. On this machine use the Meet/Zoom tab capture instead.`, false); }
 });
 
 // Screenshot (code problems on screen)
@@ -176,9 +280,8 @@ $('btnShot').addEventListener('click', async () => {
 // End session -> AI notes
 $('btnEnd').addEventListener('click', async () => {
   clearInterval(liveTimerId);
-  recognition?.stop(); recognition = null;
-  mediaRecorder?.stop(); tabStream?.getTracks().forEach((t) => t.stop()); micStream?.getTracks().forEach((t) => t.stop());
-  $('btnMic').textContent = '🎙️ Mic: off';
+  stopAllAudio();
+  audioStatus('Session ended.');
   if (!session) return;
   const qs = session.qa.map((x) => x.q);
   let notes;
