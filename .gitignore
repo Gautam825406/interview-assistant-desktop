@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+# Local app data (contains the Groq key if saved in Settings) — never commit
+# settings.json / sessions.json live in the OS userData folder, not here.
