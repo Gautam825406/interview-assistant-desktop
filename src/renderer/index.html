@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Interview Assistant</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+  <!-- Draggable title bar (frameless window) -->
+  <header id="titlebar">
+    <div class="title-drag">
+      <span class="logo">🎙️</span>
+      <strong>Interview Assistant</strong>
+      <span id="modeBadge" class="badge demo">DEMO MODE</span>
+      <span id="privateBadge" class="badge private" title="Content protection ON — excluded from normal screen capture">🔒 Private</span>
+    </div>
+    <div class="title-btns">
+      <button id="btnPrivate" title="Toggle Private mode (Ctrl+Shift+P)">🔒</button>
+      <button id="btnMin" title="Minimise (Ctrl+Shift+M)">—</button>
+      <button id="btnHide" title="Hide to tray (Ctrl+Shift+I)">✕</button>
+    </div>
+  </header>
+
+  <nav id="tabs">
+    <button data-view="dashboard" class="active">🏠 Home</button>
+    <button data-view="live">🔴 Live</button>
+    <button data-view="mock">🎤 Mock</button>
+    <button data-view="bank">📚 Questions</button>
+    <button data-view="pricing">💳 Pricing</button>
+    <button data-view="settings">⚙️ Settings</button>
+  </nav>
+
+  <!-- DASHBOARD -->
+  <section id="view-dashboard" class="view active">
+    <div class="card hero">
+      <h1>Get the right answer<br/>while you're still talking.</h1>
+      <p>Live interview helper for Google Meet &amp; Zoom. It listens, detects the question, and suggests an answer — discreetly.</p>
+      <div class="notice">⚠️ <strong>Use only where live assistance is permitted.</strong> This window is excluded from <em>normal</em> screen-share by content protection, but it is <strong>not undetectable</strong> — proctoring tools can still detect it. Check the interviewer's / company's rules first.</div>
+    </div>
+    <div class="card">
+      <h2>Start a session</h2>
+      <label>Mode
+        <select id="sessMode"><option value="interview">🎯 Interview — uses your resume</option><option value="call">📞 Regular call — meetings / sales</option></select>
+      </label>
+      <div class="row">
+        <label>Company <input id="sessCompany" placeholder="e.g. Google" /></label>
+        <label>Role <input id="sessRole" placeholder="e.g. GenAI Engineer Intern" /></label>
+      </div>
+      <label>Language
+        <select id="sessLang"><option value="en">English</option><option value="hi">हिन्दी (Hindi)</option><option value="hinglish">Hinglish</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="ja">Japanese</option></select>
+      </label>
+      <label>Job description / instructions <span class="muted">(up to 20,000 chars)</span>
+        <textarea id="sessJD" rows="3" maxlength="20000" placeholder="Paste the job description, or instructions for the assistant…"></textarea>
+      </label>
+      <label>Resume
+        <div class="row"><button id="btnResume" class="btn secondary">📄 Upload resume (PDF / TXT)</button><span id="resumeName" class="muted">No resume loaded</span></div>
+      </label>
+      <div class="row">
+        <button id="btnStartLive" class="btn primary">🔴 Start live session</button>
+        <button id="btnStartMock" class="btn secondary">🎤 Start mock interview</button>
+      </div>
+      <p class="muted small">Audio: share your Meet/Zoom browser tab (tab audio) or use your mic in the Live view. Desktop Zoom app audio needs a virtual audio cable — see README.</p>
+    </div>
+    <div class="card">
+      <h2>Saved sessions <span id="sessCount" class="muted"></span></h2>
+      <div id="savedList"><p class="muted">No sessions saved yet.</p></div>
+    </div>
+  </section>
+
+  <!-- LIVE -->
+  <section id="view-live" class="view">
+    <div class="card">
+      <div class="row between"><h2>🔴 Live session <span id="liveTimer" class="muted">00:00</span></h2>
+        <label class="switch">Auto Answer <input type="checkbox" id="autoAnswer" checked /></label></div>
+      <p class="muted small" id="liveMeta">No session started — start one from Home, or type a question below to test.</p>
+      <div class="row">
+        <button id="btnMic" class="btn secondary">🎙️ Mic: off</button>
+        <button id="btnTabAudio" class="btn secondary">🖥️ Capture Meet / Zoom tab audio</button>
+        <button id="btnShot" class="btn secondary">📸 Screenshot</button>
+        <button id="btnEnd" class="btn danger">End session</button>
+      </div>
+      <div id="shotBox"></div>
+      <label>Interviewer question (type it, or let the transcript detect it)
+        <div class="row"><input id="qInput" placeholder="e.g. Tell me about yourself…" /><button id="btnAsk" class="btn primary">Answer</button></div>
+      </label>
+      <div class="row small">
+        <button class="btn ghost demo-q" data-q="Tell me about yourself">Tell me about yourself</button>
+        <button class="btn ghost demo-q" data-q="Explain RAG and how you used it in RegLens">Explain RAG</button>
+        <button class="btn ghost demo-q" data-q="How would you solve Two Sum?">Two Sum</button>
+        <button class="btn ghost demo-q" data-q="Design a URL shortener system">System design</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>💡 Suggested answer <span id="ansSource" class="muted small"></span></h2>
+      <div id="answerBox"><p class="muted">Answers appear here when a question is detected.</p></div>
+      <div id="answerDetail"></div>
+    </div>
+    <div class="card">
+      <h2>📝 Live transcript</h2>
+      <div id="transcript" class="transcript"><p class="muted">Transcript will appear here. Mic uses browser speech recognition when available; tab audio + Groq Whisper is used when a Groq key is set.</p></div>
+    </div>
+    <div class="card" id="notesCard" hidden>
+      <h2>🧾 AI Notes — after the call</h2>
+      <div id="notesBox"></div>
+      <button id="btnSaveSession" class="btn primary">💾 Save session</button>
+    </div>
+  </section>
+
+  <!-- MOCK -->
+  <section id="view-mock" class="view">
+    <div class="card">
+      <h2>🎤 Mock Interview</h2>
+      <p class="muted">Practice against an AI interviewer. Your first mock is free — that's the idea, anyway: in this app mocks are unlimited in Demo Mode.</p>
+      <label>Topic
+        <select id="mockTopic"><option>GenAI / RAG</option><option>DSA</option><option>HR / Behavioural</option><option>System Design</option><option>Python + FastAPI</option><option>SQL</option></select>
+      </label>
+      <div class="row"><button id="btnMockStart" class="btn primary">Start mock</button><button id="btnMockNext" class="btn secondary" disabled>Next question →</button><button id="btnMockEnd" class="btn danger" disabled>Finish &amp; feedback</button></div>
+      <div class="row"><span class="muted">Question <b id="mockNum">0</b> / 5</span><span class="muted" id="mockTimer">00:00</span></div>
+      <div id="mockQ" class="mock-q">Press “Start mock”.</div>
+      <label>Your answer <textarea id="mockA" rows="4" placeholder="Answer out loud or type it here…"></textarea></label>
+      <button id="btnMockEval" class="btn secondary" disabled>Evaluate this answer</button>
+      <div id="mockFeedback"></div>
+    </div>
+  </section>
+
+  <!-- QUESTION BANK -->
+  <section id="view-bank" class="view">
+    <div class="card"><h2>📚 Question Bank</h2><p class="muted">Company-wise sample questions. Tap one to send it to the Live view.</p>
+      <label>Company <select id="bankCompany"></select></label>
+      <div id="bankList"></div>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section id="view-pricing" class="view">
+    <div class="card"><h2>💳 Pricing <span class="muted small">(display only — no real payment in this app)</span></h2>
+      <div class="plans">
+        <div class="plan"><h3>Free</h3><p class="price">$0</p><p>10 sessions × 10 min<br/>1 free mock interview</p></div>
+        <div class="plan"><h3>Weekly</h3><p class="price">$78<span>/week</span></p><p>Unlimited calls<br/>Unlimited mocks</p></div>
+        <div class="plan hot"><h3>Monthly ★ Most popular</h3><p class="price">$149.90<span>/month</span></p><p>Unlimited calls + mocks<br/>Resume PDFs + headshots</p></div>
+        <div class="plan"><h3>Yearly ★ Best value</h3><p class="price">$49.99<span>/mo</span></p><p>$599.90 billed yearly<br/>Everything in Monthly</p></div>
+      </div>
+      <h3>Credits (pay as you go)</h3>
+      <p class="muted">0.5 credit = 30-minute session. 1 credit $38 · 3 credits $59 · 8 credits $118 · 15 credits $177. Credits never expire.</p>
+      <p class="muted small">Powered by OpenAI, Anthropic &amp; Google in the original product. This app uses Groq (gpt-oss-120b) when you add a key, or Demo Mode without one.</p>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="view-settings" class="view">
+    <div class="card"><h2>⚙️ Settings</h2>
+      <label>Groq API key <span class="muted">(stored locally in app data only — never in the code)</span>
+        <input id="setKey" type="password" placeholder="gsk_…" /></label>
+      <label>Model
+        <select id="setModel"><option value="openai/gpt-oss-120b">openai/gpt-oss-120b (default)</option><option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option><option value="meta-llama/llama-4-scout-17b-16e-instruct">llama-4-scout-17b</option></select>
+      </label>
+      <label>Default language <select id="setLang"><option value="en">English</option><option value="hi">Hindi</option><option value="hinglish">Hinglish</option></select></label>
+      <button id="btnSaveSettings" class="btn primary">Save settings</button>
+      <p id="setStatus" class="muted"></p>
+      <p class="muted small">Get a free key at console.groq.com → API Keys. Without a key the app runs in Demo Mode with canned answers — great for testing the flow, not for real interviews.</p>
+      <h3>Hotkeys</h3>
+      <p class="muted">Ctrl+Shift+I — show / hide window &nbsp;·&nbsp; Ctrl+Shift+P — toggle Private mode &nbsp;·&nbsp; Ctrl+Shift+M — minimise</p>
+      <h3>Privacy — read this</h3>
+      <p class="muted">Content protection excludes this window from <strong>normal</strong> screen-share / screenshots on Windows and macOS. It does <strong>not</strong> hide the app from Task Manager / Activity Monitor, and it does <strong>not</strong> defeat proctoring or interview-detection software. Use live assistance only where it is permitted.</p>
+      <button id="btnQuit" class="btn danger">Quit app</button>
+    </div>
+  </section>
+</div>
+<script src="demo-bank.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>
