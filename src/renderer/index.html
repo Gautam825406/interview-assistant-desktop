@@ -61,7 +61,7 @@
         <button id="btnStartLive" class="btn primary">🔴 Start live session</button>
         <button id="btnStartMock" class="btn secondary">🎤 Start mock interview</button>
       </div>
-      <p class="muted small">Audio: share your Meet/Zoom browser tab (tab audio) or use your mic in the Live view. Desktop Zoom app audio needs a virtual audio cable — see README.</p>
+      <p class="muted small">Audio: use your mic, capture the Meet/Zoom browser tab, or capture system audio for the Zoom desktop app — all transcribed with Groq Whisper (free key in Settings). Without a key, only typing works in this app.</p>
     </div>
     <div class="card">
       <h2>Saved sessions <span id="sessCount" class="muted"></span></h2>
@@ -78,9 +78,11 @@
       <div class="row">
         <button id="btnMic" class="btn secondary">🎙️ Mic: off</button>
         <button id="btnTabAudio" class="btn secondary">🖥️ Capture Meet / Zoom tab audio</button>
+        <button id="btnSysAudio" class="btn secondary">🔊 System audio (Zoom app)</button>
         <button id="btnShot" class="btn secondary">📸 Screenshot</button>
         <button id="btnEnd" class="btn danger">End session</button>
       </div>
+      <p class="muted small" id="audioStatus">Audio: mic off · tab audio off · system audio off. Add a Groq key in Settings to transcribe audio.</p>
       <div id="shotBox"></div>
       <label>Interviewer question (type it, or let the transcript detect it)
         <div class="row"><input id="qInput" placeholder="e.g. Tell me about yourself…" /><button id="btnAsk" class="btn primary">Answer</button></div>
@@ -99,7 +101,7 @@
     </div>
     <div class="card">
       <h2>📝 Live transcript</h2>
-      <div id="transcript" class="transcript"><p class="muted">Transcript will appear here. Mic uses browser speech recognition when available; tab audio + Groq Whisper is used when a Groq key is set.</p></div>
+      <div id="transcript" class="transcript"><p class="muted">Transcript will appear here. Mic, tab audio and system audio are all transcribed with Groq Whisper when a key is set in Settings.</p></div>
     </div>
     <div class="card" id="notesCard" hidden>
       <h2>🧾 AI Notes — after the call</h2>
