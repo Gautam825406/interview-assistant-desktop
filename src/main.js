@@ -60,7 +60,19 @@ async function apiFetch(reqPath, { method = 'GET', body = null, form = null } = 
   let payload;
   if (form) { payload = form; /* fetch sets the multipart boundary itself */ }
   else if (body != null) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
-  const res = await fetch(base + reqPath, { method, headers, body: payload });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 120000); // free tier can take ~60s to wake; never hang forever
+  let res;
+  try {
+    res = await fetch(base + reqPath, { method, headers, body: payload, signal: ctrl.signal });
+  } catch (err) {
+    clearTimeout(timer);
+    const msg = err?.name === 'AbortError'
+      ? 'The server is taking too long to respond — it may be waking up. Please try again.'
+      : 'Could not reach the service: ' + (err?.message || 'network error');
+    return { status: 0, data: { error: msg } };
+  }
+  clearTimeout(timer);
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text }; }
@@ -248,7 +260,12 @@ ipcMain.handle('sessions:delete', (_e, id) => {
 ipcMain.handle('app:private-mode', () => privateMode);
 ipcMain.handle('app:toggle-private', () => togglePrivate());
 ipcMain.handle('app:hide', () => { mainWindow?.hide(); return true; });
-ipcMain.handle('app:minimise', () => { mainWindow?.minimize(); return true; });
+ipcMain.handle('app:minimise', () => {
+  // Minimise to the tray, not a real minimise: this window has no taskbar
+  // button (skipTaskbar), so a normal minimise can strand it with no way
+  // back. The tray icon restores it (Show / Hide).
+  mainWindow?.hide(); return true;
+});
 ipcMain.handle('app:quit', () => { app.quitting = true; app.quit(); return true; });
 
 // ---- IPC: screen / tab sources for Meet / Zoom capture ----
