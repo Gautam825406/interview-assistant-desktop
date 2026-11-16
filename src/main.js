@@ -182,7 +182,10 @@ ipcMain.handle('groq:transcribe', async (_e, { key, base64, mime }) => {
   try {
     const buf = Buffer.from(base64, 'base64');
     const form = new FormData();
-    form.append('file', new Blob([buf], { type: mime || 'audio/webm' }), 'chunk.webm');
+    // The filename extension must match the audio container, or Whisper
+    // rejects the file as "not a valid media file".
+    const ext = (mime || '').includes('mp4') ? 'mp4' : 'webm';
+    form.append('file', new Blob([buf], { type: mime || 'audio/webm' }), 'chunk.' + ext);
     form.append('model', 'whisper-large-v3-turbo');
     form.append('response_format', 'json');
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
