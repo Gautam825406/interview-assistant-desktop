@@ -1,17 +1,26 @@
 /**
- * Interview Assistant — Electron main process
+ * Interview Assistant — Electron main process (SaaS client)
  *
- * Frameless, always-on-top, discreet overlay window.
+ * The app is a client for the Interview Assistant SaaS backend. It holds NO
+ * provider API keys — the backend (FastAPI) holds the owner's keys
+ * (Fernet-encrypted) and proxies all AI calls. Users sign up / log in, and
+ * the backend enforces their subscription plan.
+ *
+ * Window: frameless, always-on-top, discreet overlay. Transparent by
+ * default (frosted-glass UI); a solid mode is available in Settings.
  * setContentProtection(true) excludes the window from normal screen
  * capture / screen-share on Windows (WDA_EXCLUDEFROMCAPTURE) and macOS.
- * That is NOT invisibility from proctoring / detection tools — see README
- * and the in-app privacy note. Use live help only where it is permitted.
+ * That is NOT invisibility from proctoring / detection tools — see the
+ * in-app privacy note. Use live help only where it is permitted.
  */
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, desktopCapturer, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, desktopCapturer, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+const DEFAULT_API_BASE = 'https://interview-assistant-api.onrender.com';
+
 let mainWindow = null;
+let checkoutWindow = null;
 let tray = null;
 let privateMode = true; // content protection ON by default
 
@@ -19,6 +28,12 @@ const userData = () => app.getPath('userData');
 const sessionsFile = () => path.join(userData(), 'sessions.json');
 const settingsFile = () => path.join(userData(), 'settings.json');
 
+function defaultSettings() {
+  return { apiBase: DEFAULT_API_BASE, token: '', user: null, language: 'en', autoAnswer: true, transparent: true };
+}
+function readSettings() {
+  return { ...defaultSettings(), ...readJson(settingsFile(), {}) };
+}
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
@@ -27,19 +42,38 @@ function writeJson(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
+// ---- Backend API (main process does the fetching, so no CORS issues
+// for the file:// renderer, and the JWT never has to leave main) ----
+async function apiFetch(reqPath, { method = 'GET', body = null, form = null } = {}) {
+  const s = readSettings();
+  const base = (s.apiBase || DEFAULT_API_BASE).replace(/\/$/, '');
+  const headers = {};
+  if (s.token) headers.Authorization = `Bearer ${s.token}`;
+  let payload;
+  if (form) { payload = form; /* fetch sets the multipart boundary itself */ }
+  else if (body != null) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+  const res = await fetch(base + reqPath, { method, headers, body: payload });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  return { status: res.status, data };
+}
+
 function createWindow() {
+  const s = readSettings();
+  const transparent = s.transparent !== false;
   mainWindow = new BrowserWindow({
-    width: 440,
-    height: 680,
-    minWidth: 360,
-    minHeight: 480,
+    width: 460,
+    height: 700,
+    minWidth: 380,
+    minHeight: 500,
     frame: false,               // frameless overlay
-    transparent: false,
+    transparent,                // see-through window; UI is a frosted-glass panel
     alwaysOnTop: true,          // stays above Meet / Zoom
     skipTaskbar: true,          // hidden from taskbar / Alt+Tab on Windows
     resizable: true,
     show: false,
-    backgroundColor: '#0f172a',
+    backgroundColor: transparent ? '#00000000' : '#0f172a',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -61,11 +95,20 @@ function createWindow() {
   });
 }
 
+function recreateWindow() {
+  // Transparency can only be set at window creation, so toggling it
+  // rebuilds the window. Settings (incl. token) persist in userData.
+  if (mainWindow) { mainWindow.destroy(); mainWindow = null; }
+  createWindow();
+}
+
 function createTray() {
-  tray = new Tray(path.join(__dirname, 'renderer', 'icon.png').length ? path.join(__dirname, 'renderer', 'icon.png') : undefined);
+  const iconPath = path.join(__dirname, 'renderer', 'icon.png');
+  tray = new Tray(fs.existsSync(iconPath) ? iconPath : undefined);
   const menu = Menu.buildFromTemplate([
     { label: 'Show / Hide  (Ctrl+Shift+I)', click: () => toggleWindow() },
     { label: 'Toggle Private mode  (Ctrl+Shift+P)', click: () => togglePrivate() },
+    { label: 'Toggle transparent window', click: () => { const s = readSettings(); writeJson(settingsFile(), { ...s, transparent: s.transparent === false }); recreateWindow(); } },
     { type: 'separator' },
     { label: 'Quit', click: () => { app.quitting = true; app.quit(); } },
   ]);
@@ -107,11 +150,82 @@ app.on('window-all-closed', () => {
 });
 app.on('will-quit', () => globalShortcut.unregisterAll());
 
-// ---- IPC: settings (Groq key stored locally in userData, never in the repo) ----
-ipcMain.handle('settings:get', () => readJson(settingsFile(), { groqKey: '', model: 'openai/gpt-oss-120b', language: 'en', autoAnswer: true }));
-ipcMain.handle('settings:save', (_e, s) => { writeJson(settingsFile(), s); return true; });
+// ---- IPC: settings (JWT + user cached here; NO provider keys anywhere) ----
+ipcMain.handle('settings:get', () => readSettings());
+ipcMain.handle('settings:save', (_e, s) => { writeJson(settingsFile(), { ...readSettings(), ...s }); return true; });
+ipcMain.handle('app:set-transparent', (_e, transparent) => {
+  writeJson(settingsFile(), { ...readSettings(), transparent: !!transparent });
+  recreateWindow();
+  return true;
+});
 
-// ---- IPC: sessions (JSON in userData) ----
+// ---- IPC: auth (token lives in userData/settings.json) ----
+ipcMain.handle('auth:login', async (_e, { email, password }) => {
+  const r = await apiFetch('/api/auth/login', { method: 'POST', body: { email, password } });
+  if (r.status === 200 && r.data?.token) {
+    writeJson(settingsFile(), { ...readSettings(), token: r.data.token, user: r.data.user || null });
+  }
+  return r;
+});
+ipcMain.handle('auth:signup', async (_e, { name, email, password }) => {
+  const r = await apiFetch('/api/auth/signup', { method: 'POST', body: { name, email, password } });
+  if (r.status === 200 && r.data?.token) {
+    writeJson(settingsFile(), { ...readSettings(), token: r.data.token, user: r.data.user || null });
+  }
+  return r;
+});
+ipcMain.handle('auth:logout', () => {
+  writeJson(settingsFile(), { ...readSettings(), token: '', user: null });
+  return true;
+});
+
+// ---- IPC: generic backend call (Bearer attached in main) ----
+ipcMain.handle('api:call', (_e, reqPath, opts) => apiFetch(reqPath, opts || {}));
+
+// ---- IPC: transcription — audio chunk -> multipart POST /api/ai/transcribe ----
+ipcMain.handle('api:transcribe', async (_e, { base64, mime }) => {
+  try {
+    const buf = Buffer.from(base64 || '', 'base64');
+    const form = new FormData();
+    // The filename extension must match the audio container, or Whisper
+    // rejects the file as "not a valid media file".
+    const ext = (mime || '').includes('mp4') ? 'mp4' : 'webm';
+    form.append('audio', new Blob([buf], { type: mime || 'audio/webm' }), 'chunk.' + ext);
+    return await apiFetch('/api/ai/transcribe', { method: 'POST', form });
+  } catch (err) {
+    return { status: 0, data: { error: err.message } };
+  }
+});
+
+// ---- IPC: Cashfree checkout window ----
+// The checkout runs in its own window (renderer/checkout.html) which loads
+// the Cashfree JS SDK (prod or sandbox, per the backend's mode) and calls
+// checkout() with the payment_session_id. After paying, the window verifies
+// via GET /api/subscriptions/verify?order_id=... — the webhook activates
+// the subscription server-side even if the user closes the window.
+ipcMain.handle('checkout:open', (_e, { paymentSessionId, mode, orderId }) => {
+  if (checkoutWindow) { checkoutWindow.focus(); return true; }
+  checkoutWindow = new BrowserWindow({
+    width: 480,
+    height: 720,
+    frame: true,
+    title: 'Complete payment — Interview Assistant',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  checkoutWindow.loadFile(path.join(__dirname, 'renderer', 'checkout.html'), {
+    query: { psid: paymentSessionId || '', mode: mode || 'SANDBOX', order_id: orderId || '' },
+  });
+  checkoutWindow.on('closed', () => { checkoutWindow = null; });
+  return true;
+});
+ipcMain.handle('app:open-external', (_e, url) => { shell.openExternal(url); return true; });
+
+// ---- IPC: sessions (local history in userData) ----
 ipcMain.handle('sessions:list', () => readJson(sessionsFile(), []));
 ipcMain.handle('sessions:save', (_e, session) => {
   const list = readJson(sessionsFile(), []);
@@ -158,73 +272,4 @@ ipcMain.handle('resume:pick-file', async () => {
     catch (e) { return { ok: false, error: e.message }; }
   })()) };
   return { path: fp, ok: true, text: fs.readFileSync(fp, 'utf8').slice(0, 20000) };
-});
-
-// ---- IPC: Groq vision — read a screenshot and extract the question ----
-ipcMain.handle('groq:vision', async (_e, { key, image }) => {
-  if (!key) return { ok: false, error: 'No Groq API key set. Add it in Settings.' };
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model: 'qwen/qwen3.8-27b', // Groq's live vision model (Nov 2026). Llama 4 Scout was decommissioned 2026-07-17, qwen3.6-27b shut down 2026-09-14.
-        messages: [{ role: 'user', content: [
-          { type: 'text', text: 'Read this screenshot of an interview / coding question on screen. Extract the exact question or problem shown, word for word, including any code, numbers and constraints. Reply with ONLY the extracted question/problem text, nothing else. If no question is visible, reply with exactly: NO QUESTION FOUND' },
-          { type: 'image_url', image_url: { url: image } },
-        ] }],
-        temperature: 0.2,
-        max_tokens: 1000,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) return { ok: false, error: data?.error?.message || `Groq error ${res.status}` };
-    // qwen3.8 is a thinking model — strip any reasoning block so only the question remains
-    const raw = data.choices?.[0]?.message?.content || '';
-    return { ok: true, text: raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim() };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-});
-
-// ---- IPC: Groq chat (key comes from Settings, never hard-coded) ----
-ipcMain.handle('groq:chat', async (_e, { key, model, messages }) => {
-  if (!key) return { ok: false, error: 'No Groq API key set. Add it in Settings, or use Demo Mode.' };
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: model || 'openai/gpt-oss-120b', messages, temperature: 0.4, max_tokens: 1200 }),
-    });
-    const data = await res.json();
-    if (!res.ok) return { ok: false, error: data?.error?.message || `Groq error ${res.status}` };
-    return { ok: true, text: data.choices?.[0]?.message?.content || '' };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-});
-
-// ---- IPC: Groq Whisper transcription (audio blob -> base64 from renderer) ----
-ipcMain.handle('groq:transcribe', async (_e, { key, base64, mime }) => {
-  if (!key) return { ok: false, error: 'No Groq API key set.' };
-  try {
-    const buf = Buffer.from(base64, 'base64');
-    const form = new FormData();
-    // The filename extension must match the audio container, or Whisper
-    // rejects the file as "not a valid media file".
-    const ext = (mime || '').includes('mp4') ? 'mp4' : 'webm';
-    form.append('file', new Blob([buf], { type: mime || 'audio/webm' }), 'chunk.' + ext);
-    form.append('model', 'whisper-large-v3-turbo');
-    form.append('response_format', 'json');
-    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}` },
-      body: form,
-    });
-    const data = await res.json();
-    if (!res.ok) return { ok: false, error: data?.error?.message || `Groq error ${res.status}` };
-    return { ok: true, text: data.text || '' };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
 });
