@@ -18,6 +18,8 @@ let micRecorder = null;
 let sysStream = null, sysRecorder = null;
 let whisperBusy = false, whisperQueue = [], lastWhisperText = '', noKeyWarned = false, whisperErrorShown = false, planLimitShown = false;
 let mock = { topic: '', idx: 0, questions: [], answers: [] };
+let lastAudioStatus = 'Audio: mic off · tab audio off · system audio off.';
+let lastShotNote = '';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
@@ -257,6 +259,12 @@ async function startSession(kind) {
   if (!ok) { if (kind === 'mock') { /* stay on dashboard; upgrade banner is on Live */ showView('pricing'); } return; }
   showView(kind === 'mock' ? 'mock' : 'live');
   if (kind === 'mock') startMock();
+  if (kind === 'live') {
+    // Live sessions run in the small transcript + answer overlay; the
+    // full app window hides. The overlay is fed by sendLiveUpdate().
+    window.api.liveOpen().catch(() => {});
+    sendLiveUpdate();
+  }
 }
 $('btnStartLive').addEventListener('click', () => startSession('live'));
 $('btnStartMock').addEventListener('click', () => startSession('mock'));
@@ -276,6 +284,24 @@ async function refreshSaved() {
 }
 
 // ---- Live: question -> answer (via backend /api/ai/chat) ----
+// ---- Live overlay feed: this window is the engine; the compact
+// overlay window (renderer/live.html) is the display. Every transcript
+// line and answer change is streamed to it via main ('live:update').
+// Main drops the message when no overlay is open, and buffers the last
+// one for the overlay's first paint. ----
+function sendLiveUpdate(extra = {}) {
+  if (!window.api?.liveUpdate) return;
+  window.api.liveUpdate({
+    meta: $('liveMeta')?.textContent || '',
+    startedAt: session?.startedAt || null,
+    audioStatus: lastAudioStatus,
+    shotNote: lastShotNote,
+    transcript: (session?.transcript || []).slice(-25),
+    answer: { short: $('answerBox')?.textContent || '', detail: $('answerDetail')?.textContent || '', source: $('ansSource')?.textContent || '' },
+    ...extra,
+  });
+}
+
 function addTranscript(text, isQ) {
   if (!session) startLocalSession('live');
   session.transcript.push({ t: new Date().toISOString(), text, isQ: !!isQ });
@@ -284,30 +310,35 @@ function addTranscript(text, isQ) {
   p.textContent = (isQ ? '❓ ' : '') + text;
   $('transcript').appendChild(p);
   $('transcript').scrollTop = $('transcript').scrollHeight;
+  sendLiveUpdate();
 }
 
 async function answerQuestion(question) {
   if (!session) startLocalSession('live');
   const ok = await ensureBackendSession('live');
   if (!ok) return;
-  addTranscript(question, true);
+  // The question is usually already the last transcript line (the
+  // transcriber added it before calling us) — do not add it twice.
+  if (session.transcript.at(-1)?.text !== question) addTranscript(question, true);
   $('ansSource').textContent = '…thinking';
   $('answerBox').textContent = 'Generating answer…';
   $('answerDetail').textContent = '';
+  sendLiveUpdate();
   const sys = `You are a discreet real-time interview assistant. The candidate is in a live ${session?.mode || 'interview'} for ${session?.role || 'a role'} at ${session?.company || 'a company'}. Resume:\n${resumeText.slice(0, 6000)}\n\nJob description / instructions:\n${(session?.jd || '').slice(0, 8000)}\n\nGive a concise speakable answer first (2-4 sentences), then a fuller version. If it is a coding question, give approach + complexity + short code. If system design, end with a small text flowchart. Answer in ${session?.language || 'en'}.`;
   let r;
   try {
     r = await callBackend('/api/ai/chat', { method: 'POST', body: { messages: [{ role: 'system', content: sys }, { role: 'user', content: question }], temperature: 0.4, max_tokens: 1200 } });
-  } catch (err) { $('answerBox').textContent = err.message; $('ansSource').textContent = ''; return; }
-  if (r.status === 402) { showUpgrade(r.data?.message); $('answerBox').textContent = 'Plan limit reached — upgrade to continue.'; return; }
-  if (r.status === 503) { $('answerBox').textContent = 'The service owner has not added an AI key yet — please try again later.'; $('ansSource').textContent = ''; return; }
-  if (r.status !== 200 || !r.data?.text) { $('answerBox').textContent = 'Answer failed: ' + apiError(r); $('ansSource').textContent = ''; return; }
+  } catch (err) { $('answerBox').textContent = err.message; $('ansSource').textContent = ''; sendLiveUpdate(); return; }
+  if (r.status === 402) { showUpgrade(r.data?.message); $('answerBox').textContent = 'Plan limit reached — upgrade to continue.'; sendLiveUpdate(); return; }
+  if (r.status === 503) { $('answerBox').textContent = 'The service owner has not added an AI key yet — please try again later.'; $('ansSource').textContent = ''; sendLiveUpdate(); return; }
+  if (r.status !== 200 || !r.data?.text) { $('answerBox').textContent = 'Answer failed: ' + apiError(r); $('ansSource').textContent = ''; sendLiveUpdate(); return; }
   const parts = r.data.text.split(/\n\n+/);
   const result = { short: parts[0] || r.data.text, detailed: parts.slice(1).join('\n\n'), source: `${r.data.provider || 'AI'} · ${r.data.model || ''}` };
   $('answerBox').textContent = result.short;
   $('answerDetail').textContent = result.detailed || '';
   $('ansSource').textContent = `— ${result.source}`;
   session.qa.push({ q: question, short: result.short, detailed: result.detailed, at: new Date().toISOString() });
+  sendLiveUpdate();
 }
 $('btnAsk').addEventListener('click', () => { const q = $('qInput').value.trim(); if (q) { $('qInput').value = ''; answerQuestion(q); } });
 $('qInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnAsk').click(); });
@@ -319,7 +350,7 @@ document.querySelectorAll('.demo-q').forEach((b) => b.addEventListener('click', 
 // /api/ai/transcribe in 5-second chunks (Whisper on the server side).
 // SpeechRecognition is kept only as a bonus fast path if this Chromium
 // ever provides it.
-function audioStatus(text) { const el = $('audioStatus'); if (el) el.textContent = text; }
+function audioStatus(text) { lastAudioStatus = text; const el = $('audioStatus'); if (el) el.textContent = text; sendLiveUpdate(); }
 function langCode() { return ({ en: 'en', hi: 'hi', hinglish: 'hi' })[session?.language || settings.language] || 'en'; }
 function pickMimeType() {
   for (const m of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', '']) {
@@ -484,34 +515,53 @@ $('btnSysAudio').addEventListener('click', async () => {
 });
 
 // Screenshot: capture the screen, READ the question in it via /api/ai/vision,
-// then answer it — no typing needed.
-$('btnShot').addEventListener('click', async () => {
+// then answer it — no typing needed. Extracted so the overlay button and
+// the Ctrl+Shift+S global shortcut can trigger the same flow.
+async function captureScreenshot() {
+  lastShotNote = '📸 Capturing screen…'; sendLiveUpdate();
   $('shotBox').innerHTML = '<p class="muted small">📸 Capturing screen…</p>';
   try {
     const sources = await window.api.captureSources();
-    if (!sources.length) { $('shotBox').innerHTML = '<p class="muted small">No screen found to capture.</p>'; return; }
+    if (!sources.length) { $('shotBox').innerHTML = '<p class="muted small">No screen found to capture.</p>'; lastShotNote = 'No screen found to capture.'; sendLiveUpdate(); return; }
     const shot = sources.find((s) => s.id.startsWith('screen:')) || sources[0];
+    lastShotNote = '📸 Reading the screenshot…'; sendLiveUpdate();
     $('shotBox').innerHTML = `<img src="${shot.thumbnail}" /><p class="muted small">📸 Reading the screenshot…</p>`;
     let r;
     try { r = await callBackend('/api/ai/vision', { method: 'POST', body: { image: shot.thumbnail } }); }
-    catch (err) { $('shotBox').innerHTML += `<p class="muted small">${esc(err.message)}</p>`; return; }
-    if (r.status === 402) { showUpgrade(r.data?.message); $('shotBox').innerHTML += '<p class="muted small">Plan limit reached — upgrade to continue.</p>'; return; }
-    if (r.status === 503) { $('shotBox').innerHTML += '<p class="muted small">Screenshot reading is unavailable — the service owner has not added an AI key yet.</p>'; return; }
-    if (r.status !== 200 || !r.data?.text) { $('shotBox').innerHTML += `<p class="muted small">Could not read the screenshot: ${esc(apiError(r))}</p>`; return; }
+    catch (err) { $('shotBox').innerHTML += `<p class="muted small">${esc(err.message)}</p>`; lastShotNote = err.message; sendLiveUpdate(); return; }
+    if (r.status === 402) { showUpgrade(r.data?.message); $('shotBox').innerHTML += '<p class="muted small">Plan limit reached — upgrade to continue.</p>'; lastShotNote = 'Plan limit reached.'; sendLiveUpdate(); return; }
+    if (r.status === 503) { $('shotBox').innerHTML += '<p class="muted small">Screenshot reading is unavailable — the service owner has not added an AI key yet.</p>'; lastShotNote = 'Screenshot reading unavailable — no AI key yet.'; sendLiveUpdate(); return; }
+    if (r.status !== 200 || !r.data?.text) { $('shotBox').innerHTML += `<p class="muted small">Could not read the screenshot: ${esc(apiError(r))}</p>`; lastShotNote = 'Could not read the screenshot.'; sendLiveUpdate(); return; }
     const q = (r.data.text || '').trim();
     if (!q || /^NO QUESTION FOUND/i.test(q)) {
       $('shotBox').innerHTML += '<p class="muted small">No question found in the screenshot — make sure the problem is visible on screen, then try again.</p>';
+      lastShotNote = 'No question found in the screenshot.'; sendLiveUpdate();
       return;
     }
     $('shotBox').innerHTML += `<p><b>Read from screen:</b> ${esc(q)}</p>`;
+    lastShotNote = 'Read from screen: ' + q; sendLiveUpdate();
     answerQuestion(q);
   } catch (err) {
     $('shotBox').innerHTML = `<p class="muted small">Screenshot failed: ${esc(err.message)}</p>`;
+    lastShotNote = 'Screenshot failed: ' + err.message; sendLiveUpdate();
   }
-});
+}
+$('btnShot').addEventListener('click', captureScreenshot);
 
-// End session -> AI notes (via backend)
-$('btnEnd').addEventListener('click', async () => {
+// Get Answer (overlay button / Ctrl+Shift+A): answer the latest
+// question in the transcript — or the last line said — without typing.
+function getAnswerForLatest() {
+  const lines = session?.transcript || [];
+  const lastQ = [...lines].reverse().find((t) => t.isQ);
+  const target = lastQ?.text || lines[lines.length - 1]?.text;
+  if (!target) { sendLiveUpdate({ note: 'No question yet — wait for the interviewer to speak, or take a screenshot.' }); return; }
+  answerQuestion(target);
+}
+
+// End session -> AI notes (via backend). Extracted so the overlay's End
+// button (and the overlay's close) can run the same flow as the main
+// window's End button.
+async function endLiveSession() {
   clearInterval(liveTimerId);
   stopAllAudio();
   audioStatus('Session ended.');
@@ -528,7 +578,20 @@ $('btnEnd').addEventListener('click', async () => {
   $('notesBox').innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit">${esc(notes)}</pre>`;
   $('notesCard').hidden = false;
   session.notes = notes; session.durationSec = liveSeconds;
+}
+$('btnEnd').addEventListener('click', async () => {
+  await endLiveSession();
+  window.api.liveClose().catch(() => {}); // back to the full app (notes shown there)
 });
+
+// Commands from the overlay window / global shortcuts, relayed by main.
+if (window.api?.onLiveCommand) {
+  window.api.onLiveCommand(async (cmd) => {
+    if (cmd === 'do-screenshot') await captureScreenshot();
+    else if (cmd === 'do-get-answer') getAnswerForLatest();
+    else if (cmd === 'do-end') { await endLiveSession(); window.api.liveClose().catch(() => {}); }
+  });
+}
 $('btnSaveSession').addEventListener('click', async () => {
   if (!session) return;
   await window.api.sessionsSave(session);

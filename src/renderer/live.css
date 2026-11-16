@@ -1,0 +1,32 @@
+/* Compact live overlay (renderer/live.html) — transcript + answer only.
+   Builds on styles.css (same glass look); this file holds the overlay
+   layout: a small frameless window that sits over Meet / Zoom. */
+#liveApp { height: 100vh; display: flex; flex-direction: column; overflow: hidden; padding: 10px; gap: 8px; }
+
+/* ---------- overlay title bar (drag handle + hide / end) ---------- */
+#liveBar { display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, .55); backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); border: 1px solid rgba(148, 163, 184, .25); border-radius: 14px; padding: 6px 10px; flex-shrink: 0; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.live-drag { -webkit-app-region: drag; display: flex; gap: 8px; align-items: center; flex: 1; min-width: 0; }
+.live-drag strong { font-size: 14px; white-space: nowrap; }
+.live-drag #liveMeta2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-dot { width: 9px; height: 9px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, .9); animation: pulse 1.4s infinite; flex-shrink: 0; }
+.live-btns { -webkit-app-region: no-drag; display: flex; gap: 4px; }
+.live-btns button { background: transparent; border: none; color: #e2e8f0; font-size: 14px; cursor: pointer; padding: 4px 8px; border-radius: 8px; }
+.live-btns button:hover { background: rgba(148, 163, 184, .25); }
+
+/* ---------- answer + transcript cards ---------- */
+.answer-card { flex-shrink: 0; max-height: 38%; overflow-y: auto; }
+.answer-card h2 { font-size: 15px; }
+#liveAnswer { font-size: 15px; line-height: 1.55; }
+#liveDetail { margin-top: 8px; color: #dbeafe; line-height: 1.55; white-space: pre-wrap; font-size: 13px; }
+.transcript-card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.transcript-card h2 { font-size: 15px; }
+#liveTranscript { flex: 1; min-height: 0; max-height: none; }
+#liveTranscript .q { color: #fbbf24; }
+#liveStatus, #liveShotNote { margin: 6px 0 0; }
+#liveStatus:empty, #liveShotNote:empty { display: none; }
+
+/* ---------- action row ---------- */
+.live-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.live-actions .btn { flex: 1; padding: 11px 8px; }
+.live-actions .key { display: block; font-size: 10px; font-weight: 400; opacity: .75; margin-top: 2px; }
+.live-foot { text-align: center; margin: 0; flex-shrink: 0; }

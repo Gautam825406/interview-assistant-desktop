@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Live — Interview Assistant</title>
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="live.css" />
+</head>
+<body>
+<div id="liveApp">
+  <div id="liveBar">
+    <div class="live-drag"><span class="live-dot"></span><strong>🔴 LIVE</strong><span id="liveTimer2" class="muted">00:00</span><span id="liveMeta2" class="muted small"></span></div>
+    <div class="live-btns">
+      <button id="btnLiveHide" title="Hide this window (Ctrl+Shift+I)">—</button>
+      <button id="btnLiveClose" title="End session">✕</button>
+    </div>
+  </div>
+
+  <div class="card answer-card">
+    <h2>💡 Suggested answer <span id="liveAnsSource" class="muted small"></span></h2>
+    <div id="liveAnswer"><p class="muted">Answers appear here when a question is detected.</p></div>
+    <div id="liveDetail"></div>
+  </div>
+
+  <div class="card transcript-card">
+    <h2>📝 Transcript</h2>
+    <div id="liveTranscript" class="transcript"><p class="muted">Listening… transcript lines appear here.</p></div>
+    <p id="liveStatus" class="muted small"></p>
+    <p id="liveShotNote" class="muted small"></p>
+  </div>
+
+  <div class="live-actions">
+    <button id="btnLiveShot" class="btn secondary">📸 Screenshot <span class="key">Ctrl+Shift+S</span></button>
+    <button id="btnLiveAnswer" class="btn primary">💡 Get Answer <span class="key">Ctrl+Shift+A</span></button>
+    <button id="btnLiveEnd" class="btn danger">⏹ End</button>
+  </div>
+  <p class="muted small live-foot">🔒 Private — hidden from screen-share · Ctrl+Shift+I hides it.</p>
+</div>
+<script src="live.js"></script>
+</body>
+</html>
