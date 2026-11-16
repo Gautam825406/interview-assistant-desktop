@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Complete payment — Interview Assistant</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body class="solid">
+<div class="checkout">
+  <h2>💳 Complete your payment</h2>
+  <p class="muted">Secure checkout by Cashfree. Your card / UPI details go to Cashfree only — never to us.</p>
+  <p id="ckStatus">Loading secure checkout…</p>
+  <p id="ckResult"></p>
+  <div class="row">
+    <button id="btnVerify" class="btn primary">✓ I've paid — verify my plan</button>
+    <button id="btnClose" class="btn secondary">Close</button>
+  </div>
+  <p class="muted small">If you close this window after paying, your plan still activates — the payment confirmation reaches us directly. Just reopen the app and check Pricing.</p>
+</div>
+<script src="checkout.js"></script>
+</body>
+</html>
