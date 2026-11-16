@@ -168,7 +168,7 @@ ipcMain.handle('groq:vision', async (_e, { key, image }) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        model: 'qwen/qwen3.8-27b', // Groq's live vision model (Nov 2026). Llama 4 Scout was decommissioned 2026-07-17, qwen3.6-27b shut down 2026-09-14.
         messages: [{ role: 'user', content: [
           { type: 'text', text: 'Read this screenshot of an interview / coding question on screen. Extract the exact question or problem shown, word for word, including any code, numbers and constraints. Reply with ONLY the extracted question/problem text, nothing else. If no question is visible, reply with exactly: NO QUESTION FOUND' },
           { type: 'image_url', image_url: { url: image } },
@@ -179,7 +179,9 @@ ipcMain.handle('groq:vision', async (_e, { key, image }) => {
     });
     const data = await res.json();
     if (!res.ok) return { ok: false, error: data?.error?.message || `Groq error ${res.status}` };
-    return { ok: true, text: data.choices?.[0]?.message?.content || '' };
+    // qwen3.8 is a thinking model — strip any reasoning block so only the question remains
+    const raw = data.choices?.[0]?.message?.content || '';
+    return { ok: true, text: raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim() };
   } catch (err) {
     return { ok: false, error: err.message };
   }
