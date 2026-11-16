@@ -73,6 +73,8 @@ function setAuthMode(mode) {
   const signup = mode === 'signup';
   $('authNameRow').hidden = !signup;
   $('authName').required = signup;
+  $('authPhoneRow').hidden = !signup;
+  $('authPhone').required = signup;
   $('authPass').autocomplete = signup ? 'new-password' : 'current-password';
   $('authSubmit').textContent = signup ? 'Create account →' : 'Log in →';
   $('authToggleText').textContent = signup ? 'Already have an account?' : 'New here?';
@@ -124,6 +126,7 @@ $('authForm').addEventListener('submit', async (e) => {
   const email = $('authEmail').value.trim();
   const pass = $('authPass').value;
   if (authMode === 'signup' && pass.length < 6) { $('authError').textContent = 'Password must be at least 6 characters.'; return; }
+  if (authMode === 'signup' && !$('authPhone').value.trim()) { $('authError').textContent = 'Enter your mobile number — it is needed for payments.'; return; }
   const btn = $('authSubmit');
   btn.disabled = true;
   btn.textContent = authMode === 'signup' ? 'Creating account…' : 'Signing in…';
@@ -132,7 +135,7 @@ $('authForm').addEventListener('submit', async (e) => {
   const wakeTimer = setTimeout(() => { $('authStatus').textContent = 'Still connecting — the free server can take up to a minute to wake up…'; }, 8000);
   try {
     const r = authMode === 'signup'
-      ? await window.api.authSignup($('authName').value.trim(), email, pass)
+      ? await window.api.authSignup($('authName').value.trim(), email, pass, $('authPhone').value.trim())
       : await window.api.authLogin(email, pass);
     if (r.status !== 200 || !r.data?.token) { $('authError').textContent = friendlyAuthError(r); return; }
     $('authStatus').textContent = '';
