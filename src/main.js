@@ -17,7 +17,7 @@ const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, desktopCapturer
 const path = require('path');
 const fs = require('fs');
 
-const DEFAULT_API_BASE = 'https://interview-assistant-api.onrender.com';
+const DEFAULT_API_BASE = 'https://interview-assistant-api-s0sx.onrender.com';
 
 let mainWindow = null;
 let checkoutWindow = null;
