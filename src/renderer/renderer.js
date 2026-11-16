@@ -210,7 +210,7 @@ $('btnPrivate').addEventListener('click', async () => {
   $('privateBadge').style.display = on ? '' : 'none';
   $('privateBadge').textContent = on ? '🔒 Private' : '👁 Visible';
 });
-window.api.onPrivateMode((on) => { $('privateBadge').style.display = on ? '' : 'none'; });
+window.api.onPrivateMode((on) => { $('privateBadge').textContent = on ? '🔒 Private' : '👁 Visible'; });
 $('btnMin').addEventListener('click', async () => { try { await window.api.minimise(); } catch { showBridgeError(); } });
 $('btnHide').addEventListener('click', async () => { try { await window.api.hide(); } catch { showBridgeError(); } });
 $('btnQuit').addEventListener('click', async () => { try { await window.api.quit(); } catch { showBridgeError(); } });
