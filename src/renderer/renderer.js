@@ -86,23 +86,33 @@ $('tabSignup').addEventListener('click', () => {
 });
 $('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  $('authError').textContent = '';
-  const r = await window.api.authLogin($('loginEmail').value.trim(), $('loginPass').value);
-  if (r.status !== 200 || !r.data?.token) { $('authError').textContent = apiError(r); return; }
-  const m = await window.api.apiCall('/api/auth/me', {});
-  if (m.status === 200 && m.data?.user) enterApp(m.data);
-  else $('authError').textContent = 'Logged in, but could not load your account — please try again.';
+  const btn = $('loginForm').querySelector('button[type=submit]');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  $('authError').textContent = 'Contacting the service — the free server can take up to a minute to wake up. Please wait…';
+  try {
+    const r = await window.api.authLogin($('loginEmail').value.trim(), $('loginPass').value);
+    $('authError').textContent = '';
+    if (r.status !== 200 || !r.data?.token) { $('authError').textContent = apiError(r); return; }
+    const m = await window.api.apiCall('/api/auth/me', {});
+    if (m.status === 200 && m.data?.user) enterApp(m.data);
+    else $('authError').textContent = 'Logged in, but could not load your account — please try again.';
+  } finally { btn.disabled = false; btn.textContent = 'Log in →'; }
 });
 $('signupForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  $('authError').textContent = '';
   const pass = $('signupPass').value;
   if (pass.length < 6) { $('authError').textContent = 'Password must be at least 6 characters.'; return; }
-  const r = await window.api.authSignup($('signupName').value.trim(), $('signupEmail').value.trim(), pass);
-  if (r.status !== 200 || !r.data?.token) { $('authError').textContent = apiError(r); return; }
-  const m = await window.api.apiCall('/api/auth/me', {});
-  if (m.status === 200 && m.data?.user) enterApp(m.data);
-  else $('authError').textContent = 'Account created, but could not load your profile — please log in.';
+  const btn = $('signupForm').querySelector('button[type=submit]');
+  btn.disabled = true; btn.textContent = 'Creating account…';
+  $('authError').textContent = 'Contacting the service — the free server can take up to a minute to wake up. Please wait…';
+  try {
+    const r = await window.api.authSignup($('signupName').value.trim(), $('signupEmail').value.trim(), pass);
+    $('authError').textContent = '';
+    if (r.status !== 200 || !r.data?.token) { $('authError').textContent = apiError(r); return; }
+    const m = await window.api.apiCall('/api/auth/me', {});
+    if (m.status === 200 && m.data?.user) enterApp(m.data);
+    else $('authError').textContent = 'Account created, but could not load your profile — please log in.';
+  } finally { btn.disabled = false; btn.textContent = 'Create account →'; }
 });
 $('btnLogout').addEventListener('click', () => doLogout());
 
