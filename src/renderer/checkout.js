@@ -34,9 +34,11 @@ async function verify() {
 
 async function boot() {
   if (!psid) { $('ckStatus').textContent = 'No payment session — close this window and try Subscribe again.'; return; }
-  const src = mode === 'PROD'
-    ? 'https://sdk.cashfree.com/js/ui/2.0.0/cashfree.prod.js'
-    : 'https://sdk.cashfree.com/js/ui/2.0.0/cashfree.sandbox.js';
+  // Cashfree Checkout JS v3 — one bundle for both modes; the mode is
+  // chosen when Cashfree({mode}) is called. (The old js/ui/2.0.0 bundle's
+  // Cashfree is a class, so calling it as Cashfree({mode}) failed with
+  // "Cannot call a class as a function".)
+  const src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
   try {
     await loadScript(src);
     const cashfree = Cashfree({ mode: mode === 'PROD' ? 'production' : 'sandbox' });
