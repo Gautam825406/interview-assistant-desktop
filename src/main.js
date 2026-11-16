@@ -131,7 +131,8 @@ ipcMain.handle('app:quit', () => { app.quitting = true; app.quit(); return true;
 
 // ---- IPC: screen / tab sources for Meet / Zoom capture ----
 ipcMain.handle('capture:sources', async () => {
-  const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
+  // Large thumbnails so the screenshot is sharp enough for vision/OCR.
+  const sources = await desktopCapturer.getSources({ types: ['window', 'screen'], thumbnailSize: { width: 1600, height: 900 } });
   return sources.map((s) => ({ id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL() }));
 });
 
@@ -157,6 +158,31 @@ ipcMain.handle('resume:pick-file', async () => {
     catch (e) { return { ok: false, error: e.message }; }
   })()) };
   return { path: fp, ok: true, text: fs.readFileSync(fp, 'utf8').slice(0, 20000) };
+});
+
+// ---- IPC: Groq vision — read a screenshot and extract the question ----
+ipcMain.handle('groq:vision', async (_e, { key, image }) => {
+  if (!key) return { ok: false, error: 'No Groq API key set. Add it in Settings.' };
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: 'Read this screenshot of an interview / coding question on screen. Extract the exact question or problem shown, word for word, including any code, numbers and constraints. Reply with ONLY the extracted question/problem text, nothing else. If no question is visible, reply with exactly: NO QUESTION FOUND' },
+          { type: 'image_url', image_url: { url: image } },
+        ] }],
+        temperature: 0.2,
+        max_tokens: 1000,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, error: data?.error?.message || `Groq error ${res.status}` };
+    return { ok: true, text: data.choices?.[0]?.message?.content || '' };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 // ---- IPC: Groq chat (key comes from Settings, never hard-coded) ----
