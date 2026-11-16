@@ -27,6 +27,8 @@ document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('cli
 
 async function loadSettings() {
   settings = await window.api.settingsGet();
+  // Groq retired llama-3.3-70b (2026-08-16) and llama-4-scout (2026-07-17) — reset a saved dead model to the working default
+  if (['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct'].includes(settings.model)) settings.model = 'openai/gpt-oss-120b';
   $('setKey').value = settings.groqKey || '';
   $('setModel').value = settings.model || 'openai/gpt-oss-120b';
   $('setLang').value = settings.language || 'en';
