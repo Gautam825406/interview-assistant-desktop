@@ -6,7 +6,7 @@ let liveSeconds = 0, liveTimerId = null;
 let recognition = null, micStream = null, tabStream = null, mediaRecorder = null;
 let micRecorder = null;
 let sysStream = null, sysRecorder = null;
-let whisperBusy = false, whisperQueue = [], lastWhisperText = '', noKeyWarned = false;
+let whisperBusy = false, whisperQueue = [], lastWhisperText = '', noKeyWarned = false, whisperErrorShown = false;
 let mock = { topic: '', idx: 0, questions: [], answers: [] };
 
 const $ = (id) => document.getElementById(id);
@@ -156,7 +156,12 @@ async function pumpWhisperQueue() {
       continue;
     }
     const r = await window.api.groqTranscribe({ key: settings.groqKey, base64: await blobToBase64(blob), mime: mime || 'audio/webm' });
-    if (!r.ok) { addTranscript(`Transcription error: ${r.error}`, false); continue; }
+    if (!r.ok) {
+      // Don't flood the transcript with the same error every 5 seconds.
+      if (!whisperErrorShown) { whisperErrorShown = true; addTranscript(`Transcription error: ${r.error}`, false); }
+      else audioStatus(`⚠️ Transcription error: ${r.error}`);
+      continue;
+    }
     const t = (r.text || '').trim();
     if (!t || t.length < 2 || t === lastWhisperText) continue; // skip silence / repeats
     lastWhisperText = t;
@@ -166,6 +171,10 @@ async function pumpWhisperQueue() {
   }
   whisperBusy = false;
 }
+// Record in ~5 second cycles: stop the recorder, send that complete file,
+// then start a fresh recorder. Using start(5000) timeslices instead gives
+// chunks WITHOUT the file header after the first one, and Whisper rejects
+// every one of them as "not a valid media file".
 function startWhisperRecorder(stream, label) {
   // Record AUDIO ONLY — recording the whole display stream (video+audio)
   // as "audio/webm" produced unusable files, which is why tab audio
@@ -173,14 +182,30 @@ function startWhisperRecorder(stream, label) {
   const audioOnly = new MediaStream(stream.getAudioTracks());
   if (!audioOnly.getAudioTracks().length) return null;
   const mime = pickMimeType();
-  let rec;
-  try { rec = new MediaRecorder(audioOnly, mime ? { mimeType: mime } : undefined); } catch { return null; }
-  rec.ondataavailable = (e) => { if (e.data && e.data.size > 1000) { whisperQueue.push({ blob: e.data, label, mime: rec.mimeType }); pumpWhisperQueue(); } };
-  rec.onerror = () => { audioStatus(`⚠️ ${label} recorder error — restart capture.`); };
-  try { rec.start(5000); } catch { return null; } // 5-second chunks
-  return rec;
+  whisperErrorShown = false;
+  const ctrl = {
+    _stopped: false, _rec: null, _timer: null,
+    stop() {
+      this._stopped = true;
+      clearTimeout(this._timer);
+      try { if (this._rec && this._rec.state !== 'inactive') this._rec.stop(); } catch {}
+    },
+  };
+  const startOne = () => {
+    if (ctrl._stopped) return;
+    let rec;
+    try { rec = new MediaRecorder(audioOnly, mime ? { mimeType: mime } : undefined); } catch { return; }
+    ctrl._rec = rec;
+    rec.ondataavailable = (e) => { if (e.data && e.data.size > 1000) { whisperQueue.push({ blob: e.data, label, mime: rec.mimeType }); pumpWhisperQueue(); } };
+    rec.onerror = () => { audioStatus(`⚠️ ${label} recorder error — restart capture.`); };
+    rec.onstop = () => { if (!ctrl._stopped) startOne(); };
+    try { rec.start(); } catch { return; }
+    ctrl._timer = setTimeout(() => { try { if (rec.state === 'recording') rec.stop(); } catch {} }, 5000);
+  };
+  startOne();
+  return ctrl._rec ? ctrl : null;
 }
-function stopRecorder(rec) { try { if (rec && rec.state !== 'inactive') rec.stop(); } catch {} }
+function stopRecorder(rec) { try { if (rec && typeof rec.stop === 'function') rec.stop(); } catch {} }
 function stopAllAudio() {
   recognition?.stop(); recognition = null;
   stopRecorder(mediaRecorder); mediaRecorder = null;
