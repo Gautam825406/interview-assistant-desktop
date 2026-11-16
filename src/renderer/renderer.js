@@ -1,4 +1,4 @@
-// Interview Assistant — renderer (SaaS client)
+// IntervIQ — renderer (SaaS client)
 //
 // All AI goes through the backend (POST /api/ai/*). No provider keys live
 // here and there is no Demo Mode: the backend enforces the user's plan

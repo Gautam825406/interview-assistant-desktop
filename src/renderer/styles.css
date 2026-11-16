@@ -1,4 +1,4 @@
-/* Interview Assistant — glassmorphism UI.
+/* IntervIQ — glassmorphism UI.
    The window itself is transparent (transparent:true in main); the UI is a
    frosted-glass panel floating over the interview screen. body.solid is
    used when the user picks solid mode in Settings. */
