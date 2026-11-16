@@ -21,6 +21,9 @@ const DEFAULT_API_BASE = 'https://interview-assistant-api-s0sx.onrender.com';
 
 let mainWindow = null;
 let checkoutWindow = null;
+let liveWindow = null; // compact transcript + answer overlay during a live session
+let liveActive = false; // true while a live session is running (overlay is the UI)
+let lastLiveUpdate = null; // buffered payload, pushed when the overlay finishes loading
 let tray = null;
 let privateMode = true; // content protection ON by default
 
@@ -140,7 +143,63 @@ function createTray() {
   tray.on('click', () => toggleWindow());
 }
 
+// ---- Compact live overlay: transcript + suggested answer only ----
+// During a live session the full app window hides and this small window
+// (renderer/live.html) is the whole UI: transcript, current answer,
+// Screenshot and Get Answer buttons. The main window keeps running the
+// engine (audio capture, transcription, answering) while hidden, and
+// streams updates here via 'live:update'. Content protection applies
+// here too, so the overlay stays out of screen-share / screenshots.
+function createLiveWindow() {
+  if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.show(); liveWindow.focus(); return liveWindow; }
+  liveWindow = new BrowserWindow({
+    width: 420,
+    height: 620,
+    minWidth: 340,
+    minHeight: 460,
+    frame: false,               // frameless, like the main window
+    transparent: true,          // frosted-glass panel
+    alwaysOnTop: true,          // stays above Meet / Zoom
+    skipTaskbar: true,          // hidden from taskbar / Alt+Tab on Windows
+    resizable: true,
+    show: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  liveWindow.setContentProtection(privateMode);
+  liveWindow.setAlwaysOnTop(true, 'screen-saver');
+  liveWindow.loadFile(path.join(__dirname, 'renderer', 'live.html'));
+  liveWindow.once('ready-to-show', () => { liveWindow.show(); liveWindow.focus(); });
+  liveWindow.webContents.on('did-finish-load', () => {
+    if (lastLiveUpdate && !liveWindow.isDestroyed()) liveWindow.webContents.send('live:update', lastLiveUpdate);
+  });
+  liveWindow.on('closed', () => {
+    liveWindow = null;
+    // Closed without going through live:close (e.g. Alt+F4) while a
+    // session is still running: end the session in the main window so
+    // the engine does not keep running with no UI at all.
+    if (liveActive) mainWindow?.webContents.send('live:command', 'do-end');
+  });
+  return liveWindow;
+}
+function closeLiveWindow(showMain) {
+  liveActive = false;
+  if (liveWindow && !liveWindow.isDestroyed()) { liveWindow.destroy(); liveWindow = null; }
+  if (showMain && mainWindow) { mainWindow.show(); mainWindow.focus(); }
+}
+
 function toggleWindow() {
+  // During a live session the compact overlay is the window to show/hide;
+  // otherwise it is the main window.
+  if (liveActive && liveWindow && !liveWindow.isDestroyed()) {
+    if (liveWindow.isVisible()) liveWindow.hide(); else { liveWindow.show(); liveWindow.focus(); }
+    return;
+  }
   if (!mainWindow) return;
   if (mainWindow.isVisible()) mainWindow.hide(); else { mainWindow.show(); mainWindow.focus(); }
 }
@@ -162,6 +221,17 @@ app.whenReady().then(() => {
   globalShortcut.register('CommandOrControl+Shift+M', () => {
     mainWindow?.webContents.send('hotkey-minimise');
   });
+  // Live-session shortcuts — global, so they work while the user is
+  // looking at Zoom / Meet, not at the app. Only active during a live
+  // session. A = answer the latest question, S = screenshot the screen.
+  const okA = globalShortcut.register('CommandOrControl+Shift+A', () => {
+    if (liveActive) mainWindow?.webContents.send('live:command', 'do-get-answer');
+  });
+  const okS = globalShortcut.register('CommandOrControl+Shift+S', () => {
+    if (liveActive) mainWindow?.webContents.send('live:command', 'do-screenshot');
+  });
+  if (!okA) console.warn('Could not register Ctrl+Shift+A (Get Answer) — another app may own it.');
+  if (!okS) console.warn('Could not register Ctrl+Shift+S (Screenshot) — another app may own it.');
 
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
@@ -249,6 +319,27 @@ ipcMain.handle('checkout:open', (_e, { paymentSessionId, mode, orderId }) => {
   return true;
 });
 ipcMain.handle('app:open-external', (_e, url) => { shell.openExternal(url); return true; });
+
+// ---- IPC: compact live overlay ----
+ipcMain.handle('live:open', () => {
+  liveActive = true;
+  createLiveWindow();
+  mainWindow?.hide(); // full app hides; only the small overlay stays visible
+  return true;
+});
+ipcMain.handle('live:close', () => { closeLiveWindow(true); return true; });
+ipcMain.handle('live:hide', () => { liveWindow?.hide(); return true; });
+// Overlay buttons / global shortcuts -> commands for the main window
+// (it owns the audio engine, the transcript and the answer flow).
+ipcMain.handle('live:screenshot', () => { mainWindow?.webContents.send('live:command', 'do-screenshot'); return true; });
+ipcMain.handle('live:get-answer', () => { mainWindow?.webContents.send('live:command', 'do-get-answer'); return true; });
+ipcMain.handle('live:end', () => { mainWindow?.webContents.send('live:command', 'do-end'); return true; });
+// Engine -> overlay: transcript / answer / status snapshot. Buffered so
+// the overlay gets the latest state even if it loads a moment later.
+ipcMain.on('live:update', (_e, payload) => {
+  lastLiveUpdate = payload;
+  if (liveWindow && !liveWindow.isDestroyed()) liveWindow.webContents.send('live:update', payload);
+});
 
 // ---- IPC: sessions (local history in userData) ----
 ipcMain.handle('sessions:list', () => readJson(sessionsFile(), []));
