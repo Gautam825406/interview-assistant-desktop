@@ -1,7 +1,7 @@
 /**
- * Interview Assistant — Electron main process (SaaS client)
+ * IntervIQ — Electron main process (SaaS client)
  *
- * The app is a client for the Interview Assistant SaaS backend. It holds NO
+ * The app is a client for the IntervIQ SaaS backend. It holds NO
  * provider API keys — the backend (FastAPI) holds the owner's keys
  * (Fernet-encrypted) and proxies all AI calls. Users sign up / log in, and
  * the backend enforces their subscription plan.
@@ -138,7 +138,7 @@ function createTray() {
     { type: 'separator' },
     { label: 'Quit', click: () => { app.quitting = true; app.quit(); } },
   ]);
-  tray.setToolTip('Interview Assistant');
+  tray.setToolTip('IntervIQ');
   tray.setContextMenu(menu);
   tray.on('click', () => toggleWindow());
 }
@@ -302,7 +302,7 @@ ipcMain.handle('checkout:open', (_e, { paymentSessionId, mode, orderId }) => {
     width: 480,
     height: 720,
     frame: true,
-    title: 'Complete payment — Interview Assistant',
+    title: 'Complete payment — IntervIQ',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
