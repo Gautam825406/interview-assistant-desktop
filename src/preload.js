@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   settingsSave: (s) => ipcRenderer.invoke('settings:save', s),
   setTransparent: (v) => ipcRenderer.invoke('app:set-transparent', v),
   authLogin: (email, password) => ipcRenderer.invoke('auth:login', { email, password }),
-  authSignup: (name, email, password) => ipcRenderer.invoke('auth:signup', { name, email, password }),
+  authSignup: (name, email, password, phone) => ipcRenderer.invoke('auth:signup', { name, email, password, phone }),
   authLogout: () => ipcRenderer.invoke('auth:logout'),
   apiCall: (path, opts) => ipcRenderer.invoke('api:call', path, opts || {}),
   transcribe: (base64, mime) => ipcRenderer.invoke('api:transcribe', { base64, mime }),

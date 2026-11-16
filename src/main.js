@@ -260,8 +260,8 @@ ipcMain.handle('auth:login', async (_e, { email, password }) => {
   }
   return r;
 });
-ipcMain.handle('auth:signup', async (_e, { name, email, password }) => {
-  const r = await apiFetch('/api/auth/signup', { method: 'POST', body: { name, email, password } });
+ipcMain.handle('auth:signup', async (_e, { name, email, password, phone }) => {
+  const r = await apiFetch('/api/auth/signup', { method: 'POST', body: { name, email, password, phone } });
   if (r.status === 200 && r.data?.token) {
     writeJson(settingsFile(), { ...readSettings(), token: r.data.token, user: r.data.user || null });
   }
