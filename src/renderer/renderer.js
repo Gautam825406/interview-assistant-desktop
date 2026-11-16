@@ -163,6 +163,7 @@ function renderAccount() {
     : (u.plan_slug && u.plan_slug !== 'free' ? 'Paid plan, no active subscription record — check Pricing.' : 'Free plan — upgrade in Pricing for unlimited sessions and mocks.');
   $('currentPlanLine').textContent = `You are on the ${(u.plan_slug || 'free').toUpperCase()} plan.` + (sub?.expires_at ? ` Renews/expires ${new Date(sub.expires_at).toLocaleDateString()}.` : '');
   $('settingsAccount').textContent = `Signed in as ${u.name || ''} (${u.email}) — ${isAdmin() ? 'Admin' : 'Member'}.`;
+  if (document.activeElement !== $('setPhone')) $('setPhone').value = u.phone || '';
 }
 async function refreshMe() {
   try { const r = await callBackend('/api/auth/me', {}); if (r.status === 200) { me = r.data; renderAccount(); } } catch {}
@@ -195,6 +196,14 @@ async function loadSettings() {
   $('autoAnswer').checked = settings.autoAnswer !== false;
   $('sessLang').value = settings.language || 'en';
 }
+$('btnSavePhone').addEventListener('click', async () => {
+  const phone = $('setPhone').value.trim();
+  if (!phone) { $('phoneStatus').textContent = 'Enter your mobile number.'; return; }
+  $('phoneStatus').textContent = 'Saving…';
+  const r = await callBackend('/api/auth/me', { method: 'PATCH', body: { phone } });
+  if (r.status === 200) { await refreshMe(); $('phoneStatus').textContent = 'Saved.'; }
+  else $('phoneStatus').textContent = 'Save failed: ' + apiError(r);
+});
 $('btnSaveSettings').addEventListener('click', async () => {
   const transparent = $('setTransparent').checked;
   const changedTransparency = transparent !== (settings.transparent !== false);
@@ -704,10 +713,33 @@ async function subscribe(p) {
   let r;
   try { r = await callBackend('/api/subscriptions/checkout', { method: 'POST', body: { plan_slug: p.slug } }); }
   catch (err) { $('planStatus').textContent = err.message; return; }
-  if (r.status !== 200 || !r.data?.payment_session_id) { $('planStatus').textContent = 'Checkout failed: ' + apiError(r); return; }
+  if (r.status !== 200 || !r.data?.payment_session_id) {
+    if (r.status === 400 && (apiError(r) || '').includes('PHONE_REQUIRED')) { askPhoneThenRetry(p); return; }
+    $('planStatus').textContent = 'Checkout failed: ' + apiError(r); return;
+  }
   $('planStatus').textContent = 'Checkout opened — complete the payment, then your plan activates automatically.';
   await window.api.openCheckout({ paymentSessionId: r.data.payment_session_id, mode: r.data.mode || 'SANDBOX', orderId: r.data.order_id || r.data.cf_order_id });
   pollSubscription();
+}
+
+// The payment provider rejects an order with no mobile number, so ask for
+// it right here, save it on the account, and retry the checkout once.
+async function askPhoneThenRetry(p) {
+  const el = $('planStatus');
+  el.innerHTML = 'The payment provider needs your mobile number for the order.<br/>'
+    + '<input id="payPhone" type="tel" placeholder="10-digit mobile number" style="max-width:220px" /> '
+    + '<button class="btn" id="payPhoneBtn">Save number &amp; continue</button> '
+    + '<span class="muted small" id="payPhoneMsg"></span>';
+  $('payPhone').focus();
+  $('payPhoneBtn').addEventListener('click', async () => {
+    const phone = $('payPhone').value.trim();
+    if (!phone) { $('payPhoneMsg').textContent = 'Enter your mobile number.'; return; }
+    $('payPhoneMsg').textContent = 'Saving…';
+    const r = await callBackend('/api/auth/me', { method: 'PATCH', body: { phone } });
+    if (r.status !== 200) { $('payPhoneMsg').textContent = apiError(r); return; }
+    await refreshMe();
+    subscribe(p);
+  });
 }
 let pollTimer = null;
 function pollSubscription() {

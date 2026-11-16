@@ -240,6 +240,10 @@
   <section id="view-settings" class="view">
     <div class="card"><h2>⚙️ Settings</h2>
       <p class="muted" id="settingsAccount">—</p>
+      <label>Mobile number <span class="muted">(needed for payments — the payment provider requires it for the order)</span>
+        <input id="setPhone" type="tel" placeholder="10-digit mobile number" /></label>
+      <button id="btnSavePhone" class="btn">Save number</button>
+      <p id="phoneStatus" class="muted"></p>
       <label>API base URL <span class="muted">(the service backend — change only if the owner tells you to)</span>
         <input id="setApiBase" type="url" placeholder="https://interview-assistant-api-s0sx.onrender.com" /></label>
       <label>Default language <select id="setLang"><option value="en">English</option><option value="hi">Hindi</option><option value="hinglish">Hinglish</option></select></label>
