@@ -32,7 +32,15 @@ function defaultSettings() {
   return { apiBase: DEFAULT_API_BASE, token: '', user: null, language: 'en', autoAnswer: true, transparent: true };
 }
 function readSettings() {
-  return { ...defaultSettings(), ...readJson(settingsFile(), {}) };
+  const s = { ...defaultSettings(), ...readJson(settingsFile(), {}) };
+  // Auto-migrate installs that saved the old (wrong) API base before the
+  // live backend URL gained its -s0sx suffix. The plain host belongs to a
+  // different suspended service (HTTP 503), so login/signup fail there.
+  if (s.apiBase === 'https://interview-assistant-api.onrender.com') {
+    s.apiBase = DEFAULT_API_BASE;
+    try { writeJson(settingsFile(), s); } catch {}
+  }
+  return s;
 }
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
