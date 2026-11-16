@@ -295,11 +295,31 @@ $('btnSysAudio').addEventListener('click', async () => {
   } catch (err) { addTranscript(`System audio failed: ${err.message}. On this machine use the Meet/Zoom tab capture instead.`, false); }
 });
 
-// Screenshot (code problems on screen)
+// Screenshot: capture the screen, READ the question in it with Groq vision,
+// then answer it — no typing needed.
 $('btnShot').addEventListener('click', async () => {
-  const sources = await window.api.captureSources();
-  if (!sources.length) return;
-  $('shotBox').innerHTML = `<p class="muted small">Latest screen (${esc(sources[0].name)}). Type the problem text under it and press Answer — screenshots are kept locally, never uploaded.</p><img src="${sources[0].thumbnail}" />`;
+  if (!settings.groqKey) {
+    $('shotBox').innerHTML = '<p class="muted small">Screenshot reading needs a Groq key in Settings — add it, then tap Screenshot again. Without a key, type the problem in the question box instead.</p>';
+    return;
+  }
+  $('shotBox').innerHTML = '<p class="muted small">📸 Capturing screen…</p>';
+  try {
+    const sources = await window.api.captureSources();
+    if (!sources.length) { $('shotBox').innerHTML = '<p class="muted small">No screen found to capture.</p>'; return; }
+    const shot = sources.find((s) => s.id.startsWith('screen:')) || sources[0];
+    $('shotBox').innerHTML = `<img src="${shot.thumbnail}" /><p class="muted small">📸 Reading the screenshot…</p>`;
+    const r = await window.api.groqVision({ key: settings.groqKey, image: shot.thumbnail });
+    if (!r.ok) { $('shotBox').innerHTML += `<p class="muted small">Could not read the screenshot: ${esc(r.error)}</p>`; return; }
+    const q = (r.text || '').trim();
+    if (!q || /^NO QUESTION FOUND/i.test(q)) {
+      $('shotBox').innerHTML += '<p class="muted small">No question found in the screenshot — make sure the problem is visible on screen, then try again.</p>';
+      return;
+    }
+    $('shotBox').innerHTML += `<p><b>Read from screen:</b> ${esc(q)}</p>`;
+    answerQuestion(q);
+  } catch (err) {
+    $('shotBox').innerHTML = `<p class="muted small">Screenshot failed: ${esc(err.message)}</p>`;
+  }
 });
 
 // End session -> AI notes
