@@ -2,6 +2,11 @@
    The window itself is transparent (transparent:true in main); the UI is a
    frosted-glass panel floating over the interview screen. body.solid is
    used when the user picks solid mode in Settings. */
+/* The `hidden` attribute must actually hide things: #authView and #app both
+   set `display: flex`, which overrides the browser's built-in [hidden] rule,
+   so without this the login screen and the app would both stay on screen. */
+[hidden] { display: none !important; }
+
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Inter, Arial, sans-serif; background: transparent; color: #eef2ff; font-size: 14px; }
