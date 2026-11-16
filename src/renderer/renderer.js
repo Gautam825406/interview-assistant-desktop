@@ -4,7 +4,7 @@
 // here and there is no Demo Mode: the backend enforces the user's plan
 // (402 = limit reached -> upgrade prompt) and routes to the provider the
 // service owner configured in the Admin panel.
-const DEFAULT_API_BASE = 'https://interview-assistant-api.onrender.com';
+const DEFAULT_API_BASE = 'https://interview-assistant-api-s0sx.onrender.com';
 
 let settings = { apiBase: DEFAULT_API_BASE, token: '', user: null, language: 'en', autoAnswer: true, transparent: true };
 let me = null; // {user, subscription, usage} from GET /api/auth/me
