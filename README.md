@@ -1,6 +1,6 @@
 # Interview Assistant — Desktop App (Windows / macOS) — SaaS client
 
-A Parakeet-AI-style real-time interview helper for the person **giving** the
+A real-time interview helper for the person **giving** the
 interview. During a Google Meet / Zoom call it listens to the interviewer's
 audio, detects the question, and shows a suggested answer in a small,
 discreet, always-on-top window.
