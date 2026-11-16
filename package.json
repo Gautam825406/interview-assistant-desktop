@@ -51,7 +51,7 @@
   "dependencies": {
     "pdf-parse": "^1.1.1"
   },
-  "description": "Parakeet-style real-time AI interview helper for Windows and macOS — SaaS client. Listens to interviewer audio on Google Meet / Zoom, detects questions, and shows discreet suggested answers. Users sign up / log in; all AI runs through the service backend (no API keys in the app). Use only where live assistance is permitted.",
+  "description": "Real-time AI interview helper for Windows and macOS — SaaS client. Listens to interviewer audio on Google Meet / Zoom, detects questions, and shows discreet suggested answers. Users sign up / log in; all AI runs through the service backend (no API keys in the app). Use only where live assistance is permitted.",
   "devDependencies": {
     "electron": "^37.2.0",
     "electron-builder": "^26.0.12"
