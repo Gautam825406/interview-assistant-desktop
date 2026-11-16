@@ -102,10 +102,13 @@ function createWindow() {
     },
   });
 
-  // Exclude from screen capture / screen-share (Windows + macOS).
+  // Exclude from screen capture / screen-share (Windows + macOS), so the
+  // window is invisible in Zoom / Meet screen-share and in screenshots.
+  // Applied on every window creation (incl. rebuilds) and always follows
+  // the privateMode flag, so the on-screen 🔒/👁 badge never lies.
   // Does NOT hide the process from Activity Monitor / Task Manager,
   // and does NOT defeat proctoring software.
-  mainWindow.setContentProtection(true);
+  mainWindow.setContentProtection(privateMode);
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -240,6 +243,8 @@ ipcMain.handle('checkout:open', (_e, { paymentSessionId, mode, orderId }) => {
   checkoutWindow.loadFile(path.join(__dirname, 'renderer', 'checkout.html'), {
     query: { psid: paymentSessionId || '', mode: mode || 'SANDBOX', order_id: orderId || '' },
   });
+  // Payment details must not leak into a screen-share or screenshot either.
+  checkoutWindow.setContentProtection(true);
   checkoutWindow.on('closed', () => { checkoutWindow = null; });
   return true;
 });
