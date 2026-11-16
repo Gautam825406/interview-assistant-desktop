@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   captureSources: () => ipcRenderer.invoke('capture:sources'),
   pickResume: () => ipcRenderer.invoke('resume:pick-file'),
   groqChat: (args) => ipcRenderer.invoke('groq:chat', args),
+  groqVision: (args) => ipcRenderer.invoke('groq:vision', args),
   groqTranscribe: (args) => ipcRenderer.invoke('groq:transcribe', args),
   onPrivateMode: (cb) => ipcRenderer.on('private-mode-changed', (_e, v) => cb(v)),
   onHotkeyMinimise: (cb) => ipcRenderer.on('hotkey-minimise', () => cb()),
