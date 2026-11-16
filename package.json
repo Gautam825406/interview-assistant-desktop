@@ -16,7 +16,7 @@
       ]
     },
     "mac": {
-      "artifactName": "Interview-Assistant-${version}.${ext}",
+      "artifactName": "IntervIQ-${version}.${ext}",
       "category": "public.app-category.productivity",
       "target": [
         {
@@ -33,11 +33,11 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "oneClick": false,
-      "shortcutName": "Interview Assistant"
+      "shortcutName": "IntervIQ"
     },
-    "productName": "Interview Assistant",
+    "productName": "IntervIQ",
     "win": {
-      "artifactName": "Interview-Assistant-Setup-${version}.${ext}",
+      "artifactName": "IntervIQ-Setup-${version}.${ext}",
       "target": [
         {
           "arch": [
