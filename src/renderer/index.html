@@ -7,30 +7,23 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<!-- ============ AUTH (shown first — no app use without login) ============ -->
+<!-- ============ AUTH (one compact card — log in / sign up in a single form) ============ -->
 <div id="authView">
   <div class="auth-card">
     <div class="logo-big">🎙️</div>
     <h1>Interview Assistant</h1>
     <p class="tagline">Get the right answer while you're still talking.</p>
-    <div class="auth-tabs">
-      <button id="tabLogin" class="active">Log in</button>
-      <button id="tabSignup">Sign up</button>
-    </div>
+    <div class="server-row"><span id="serverDot" class="dot amber"></span><span id="serverText">Connecting…</span></div>
     <div id="authError" class="auth-error"></div>
-    <form id="loginForm">
-      <label>Email <input id="loginEmail" type="email" placeholder="you@example.com" required /></label>
-      <label>Password <input id="loginPass" type="password" placeholder="Your password" required /></label>
-      <button class="btn primary" type="submit" style="width:100%">Log in →</button>
+    <form id="authForm">
+      <div id="authNameRow" hidden><label>Name <input id="authName" type="text" placeholder="Your name" autocomplete="name" /></label></div>
+      <label>Email <input id="authEmail" type="email" placeholder="you@example.com" required autocomplete="email" /></label>
+      <label>Password <input id="authPass" type="password" placeholder="Your password" required autocomplete="current-password" /></label>
+      <button id="authSubmit" class="btn primary" type="submit" style="width:100%">Log in →</button>
     </form>
-    <form id="signupForm" hidden>
-      <label>Name <input id="signupName" type="text" placeholder="Your name" required /></label>
-      <label>Email <input id="signupEmail" type="email" placeholder="you@example.com" required /></label>
-      <label>Password <input id="signupPass" type="password" placeholder="At least 6 characters" required /></label>
-      <button class="btn primary" type="submit" style="width:100%">Create account →</button>
-      <p class="muted small">The first account on the service becomes the Admin. Free plan: 10 sessions × 10 min + 1 mock interview.</p>
-    </form>
-    <p class="muted small" style="text-align:center;margin-top:14px">Your account lives on the service — sign in on any device.</p>
+    <p id="authStatus" class="auth-status"></p>
+    <p class="auth-toggle"><span id="authToggleText">New here?</span> <button id="authToggle" type="button" class="linklike">Create account</button></p>
+    <p class="muted small" style="text-align:center;margin-top:10px">Free: 10 sessions + 1 mock. First account becomes admin.</p>
   </div>
 </div>
 
@@ -47,7 +40,7 @@
     </div>
     <div class="title-btns">
       <button id="btnPrivate" title="Toggle Private mode (Ctrl+Shift+P)">🔒</button>
-      <button id="btnMin" title="Minimise (Ctrl+Shift+M)">—</button>
+      <button id="btnMin" title="Minimise to tray (Ctrl+Shift+M)">—</button>
       <button id="btnHide" title="Hide to tray (Ctrl+Shift+I)">✕</button>
     </div>
   </header>

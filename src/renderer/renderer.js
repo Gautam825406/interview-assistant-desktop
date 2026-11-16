@@ -36,7 +36,7 @@ function isQuestion(text) {
 }
 
 // ---------- API client (main attaches the Bearer token) ----------
-async function api(path, opts = {}) {
+async function callBackend(path, opts = {}) {
   const r = await window.api.apiCall(path, opts);
   if (r.status === 401) { doLogout(true); throw new Error('Session expired — please log in again.'); }
   return r;
@@ -55,11 +55,31 @@ function showView(name) {
 document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
 
 // ---------- auth ----------
+// One compact form for log in + sign up. No tabs, no second screen: the
+// name field only appears in "create account" mode, and what you typed
+// carries over when you switch modes.
+let authMode = 'login'; // 'login' | 'signup'
 function showAuth() {
   $('authView').hidden = false;
   $('app').hidden = true;
   $('authError').textContent = '';
+  $('authStatus').textContent = '';
+  $('authEmail').focus();
 }
+function setAuthMode(mode) {
+  authMode = mode;
+  const signup = mode === 'signup';
+  $('authNameRow').hidden = !signup;
+  $('authName').required = signup;
+  $('authPass').autocomplete = signup ? 'new-password' : 'current-password';
+  $('authSubmit').textContent = signup ? 'Create account →' : 'Log in →';
+  $('authToggleText').textContent = signup ? 'Already have an account?' : 'New here?';
+  $('authToggle').textContent = signup ? 'Log in' : 'Create account';
+  $('authError').textContent = '';
+  $('authStatus').textContent = '';
+}
+$('authToggle').addEventListener('click', () => setAuthMode(authMode === 'login' ? 'signup' : 'login'));
+
 function enterApp(data) {
   me = data;
   $('authView').hidden = true;
@@ -74,45 +94,55 @@ function enterApp(data) {
 async function doLogout(silent) {
   await window.api.authLogout();
   me = null;
-  if (!silent) showAuth(); else showAuth();
+  showAuth();
 }
-$('tabLogin').addEventListener('click', () => {
-  $('tabLogin').classList.add('active'); $('tabSignup').classList.remove('active');
-  $('loginForm').hidden = false; $('signupForm').hidden = true; $('authError').textContent = '';
-});
-$('tabSignup').addEventListener('click', () => {
-  $('tabSignup').classList.add('active'); $('tabLogin').classList.remove('active');
-  $('signupForm').hidden = false; $('loginForm').hidden = true; $('authError').textContent = '';
-});
-$('loginForm').addEventListener('submit', async (e) => {
+
+function friendlyAuthError(r) {
+  if (!r) return 'Something went wrong — please try again.';
+  if (r.status === 0) return 'Could not reach the service. Check your connection, then try again.';
+  if (r.status === 401) return 'Wrong email or password — try again.';
+  if (r.status === 402) return 'Your plan limit is reached — upgrade to continue.';
+  if (r.status === 503) return 'The service is starting up — try again in a minute.';
+  const d = r.data?.detail || r.data?.error || r.data?.message;
+  if (typeof d === 'string' && d) {
+    if (/already/i.test(d)) return 'This email already has an account — log in instead.';
+    return d;
+  }
+  return 'Request failed (HTTP ' + r.status + ') — please try again.';
+}
+// Enter the app straight from the login/signup reply — no second
+// round-trip. Usage is filled in from the plan, then corrected in the
+// background by refreshMe().
+function meFromUser(user) {
+  const free = !user.plan_slug || user.plan_slug === 'free';
+  return { user, subscription: null, usage: { sessions_used: 0, mocks_used: 0, sessions_limit: free ? 10 : null, mock_limit: free ? 1 : null } };
+}
+$('authForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const btn = $('loginForm').querySelector('button[type=submit]');
-  btn.disabled = true; btn.textContent = 'Signing in…';
-  $('authError').textContent = 'Contacting the service — the free server can take up to a minute to wake up. Please wait…';
+  const email = $('authEmail').value.trim();
+  const pass = $('authPass').value;
+  if (authMode === 'signup' && pass.length < 6) { $('authError').textContent = 'Password must be at least 6 characters.'; return; }
+  const btn = $('authSubmit');
+  btn.disabled = true;
+  btn.textContent = authMode === 'signup' ? 'Creating account…' : 'Signing in…';
+  $('authError').textContent = '';
+  $('authStatus').textContent = 'Connecting…';
+  const wakeTimer = setTimeout(() => { $('authStatus').textContent = 'Still connecting — the free server can take up to a minute to wake up…'; }, 8000);
   try {
-    const r = await window.api.authLogin($('loginEmail').value.trim(), $('loginPass').value);
-    $('authError').textContent = '';
-    if (r.status !== 200 || !r.data?.token) { $('authError').textContent = apiError(r); return; }
-    const m = await window.api.apiCall('/api/auth/me', {});
-    if (m.status === 200 && m.data?.user) enterApp(m.data);
-    else $('authError').textContent = 'Logged in, but could not load your account — please try again.';
-  } finally { btn.disabled = false; btn.textContent = 'Log in →'; }
-});
-$('signupForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const pass = $('signupPass').value;
-  if (pass.length < 6) { $('authError').textContent = 'Password must be at least 6 characters.'; return; }
-  const btn = $('signupForm').querySelector('button[type=submit]');
-  btn.disabled = true; btn.textContent = 'Creating account…';
-  $('authError').textContent = 'Contacting the service — the free server can take up to a minute to wake up. Please wait…';
-  try {
-    const r = await window.api.authSignup($('signupName').value.trim(), $('signupEmail').value.trim(), pass);
-    $('authError').textContent = '';
-    if (r.status !== 200 || !r.data?.token) { $('authError').textContent = apiError(r); return; }
-    const m = await window.api.apiCall('/api/auth/me', {});
-    if (m.status === 200 && m.data?.user) enterApp(m.data);
-    else $('authError').textContent = 'Account created, but could not load your profile — please log in.';
-  } finally { btn.disabled = false; btn.textContent = 'Create account →'; }
+    const r = authMode === 'signup'
+      ? await window.api.authSignup($('authName').value.trim(), email, pass)
+      : await window.api.authLogin(email, pass);
+    if (r.status !== 200 || !r.data?.token) { $('authError').textContent = friendlyAuthError(r); return; }
+    $('authStatus').textContent = '';
+    enterApp(meFromUser(r.data.user));
+    refreshMe();
+  } catch (err) {
+    $('authError').textContent = 'Could not reach the service. Check your connection, then try again.';
+  } finally {
+    clearTimeout(wakeTimer);
+    btn.disabled = false;
+    btn.textContent = authMode === 'signup' ? 'Create account →' : 'Log in →';
+  }
 });
 $('btnLogout').addEventListener('click', () => doLogout());
 
@@ -133,11 +163,11 @@ function renderAccount() {
   $('settingsAccount').textContent = `Signed in as ${u.name || ''} (${u.email}) — ${isAdmin() ? 'Admin' : 'Member'}.`;
 }
 async function refreshMe() {
-  try { const r = await api('/api/auth/me', {}); if (r.status === 200) { me = r.data; renderAccount(); } } catch {}
+  try { const r = await callBackend('/api/auth/me', {}); if (r.status === 200) { me = r.data; renderAccount(); } } catch {}
 }
 async function loadAiStatus() {
   try {
-    const r = await api('/api/ai/status', {});
+    const r = await callBackend('/api/ai/status', {});
     if (r.status === 200) {
       aiStatus = r.data;
       const b = $('aiBadge');
@@ -181,9 +211,9 @@ $('btnPrivate').addEventListener('click', async () => {
   $('privateBadge').textContent = on ? '🔒 Private' : '👁 Visible';
 });
 window.api.onPrivateMode((on) => { $('privateBadge').style.display = on ? '' : 'none'; });
-$('btnMin').addEventListener('click', () => window.api.minimise());
-$('btnHide').addEventListener('click', () => window.api.hide());
-$('btnQuit').addEventListener('click', () => window.api.quit());
+$('btnMin').addEventListener('click', async () => { try { await window.api.minimise(); } catch { showBridgeError(); } });
+$('btnHide').addEventListener('click', async () => { try { await window.api.hide(); } catch { showBridgeError(); } });
+$('btnQuit').addEventListener('click', async () => { try { await window.api.quit(); } catch { showBridgeError(); } });
 window.api.onHotkeyMinimise(() => window.api.minimise());
 
 // ---- Resume ----
@@ -213,7 +243,7 @@ async function ensureBackendSession(kind) {
   if (session?.backendStarted) return true;
   const path = kind === 'mock' ? '/api/mocks/start' : '/api/sessions/start';
   let r;
-  try { r = await api(path, { method: 'POST', body: {} }); }
+  try { r = await callBackend(path, { method: 'POST', body: {} }); }
   catch (err) { addTranscript(err.message, false); return false; }
   if (r.status === 402) { showUpgrade(r.data?.message || 'Your plan limit is reached.'); return false; }
   if (r.status !== 200) { addTranscript('Could not start a session: ' + apiError(r), false); return false; }
@@ -267,7 +297,7 @@ async function answerQuestion(question) {
   const sys = `You are a discreet real-time interview assistant. The candidate is in a live ${session?.mode || 'interview'} for ${session?.role || 'a role'} at ${session?.company || 'a company'}. Resume:\n${resumeText.slice(0, 6000)}\n\nJob description / instructions:\n${(session?.jd || '').slice(0, 8000)}\n\nGive a concise speakable answer first (2-4 sentences), then a fuller version. If it is a coding question, give approach + complexity + short code. If system design, end with a small text flowchart. Answer in ${session?.language || 'en'}.`;
   let r;
   try {
-    r = await api('/api/ai/chat', { method: 'POST', body: { messages: [{ role: 'system', content: sys }, { role: 'user', content: question }], temperature: 0.4, max_tokens: 1200 } });
+    r = await callBackend('/api/ai/chat', { method: 'POST', body: { messages: [{ role: 'system', content: sys }, { role: 'user', content: question }], temperature: 0.4, max_tokens: 1200 } });
   } catch (err) { $('answerBox').textContent = err.message; $('ansSource').textContent = ''; return; }
   if (r.status === 402) { showUpgrade(r.data?.message); $('answerBox').textContent = 'Plan limit reached — upgrade to continue.'; return; }
   if (r.status === 503) { $('answerBox').textContent = 'The service owner has not added an AI key yet — please try again later.'; $('ansSource').textContent = ''; return; }
@@ -463,7 +493,7 @@ $('btnShot').addEventListener('click', async () => {
     const shot = sources.find((s) => s.id.startsWith('screen:')) || sources[0];
     $('shotBox').innerHTML = `<img src="${shot.thumbnail}" /><p class="muted small">📸 Reading the screenshot…</p>`;
     let r;
-    try { r = await api('/api/ai/vision', { method: 'POST', body: { image: shot.thumbnail } }); }
+    try { r = await callBackend('/api/ai/vision', { method: 'POST', body: { image: shot.thumbnail } }); }
     catch (err) { $('shotBox').innerHTML += `<p class="muted small">${esc(err.message)}</p>`; return; }
     if (r.status === 402) { showUpgrade(r.data?.message); $('shotBox').innerHTML += '<p class="muted small">Plan limit reached — upgrade to continue.</p>'; return; }
     if (r.status === 503) { $('shotBox').innerHTML += '<p class="muted small">Screenshot reading is unavailable — the service owner has not added an AI key yet.</p>'; return; }
@@ -490,7 +520,7 @@ $('btnEnd').addEventListener('click', async () => {
   let notes;
   if (qs.length) {
     let r = null;
-    try { r = await api('/api/ai/chat', { method: 'POST', body: { messages: [{ role: 'user', content: `Summarise this interview in bullets: key points discussed, decisions, action items / follow-ups.\nQuestions:\n${qs.join('\n')}\nTranscript:\n${session.transcript.map((t) => t.text).join('\n').slice(0, 6000)}` }], temperature: 0.3, max_tokens: 800 } }); } catch {}
+    try { r = await callBackend('/api/ai/chat', { method: 'POST', body: { messages: [{ role: 'user', content: `Summarise this interview in bullets: key points discussed, decisions, action items / follow-ups.\nQuestions:\n${qs.join('\n')}\nTranscript:\n${session.transcript.map((t) => t.text).join('\n').slice(0, 6000)}` }], temperature: 0.3, max_tokens: 800 } }); } catch {}
     notes = (r && r.status === 200 && r.data?.text) ? r.data.text : `Questions asked (${qs.length}):\n- ${qs.join('\n- ')}\n\nDuration: ${fmt(liveSeconds)}.`;
   } else {
     notes = 'No questions were asked in this session.';
@@ -540,7 +570,7 @@ $('btnMockEval').addEventListener('click', async () => {
   $('mockFeedback').textContent = 'Evaluating…';
   let r;
   try {
-    r = await api('/api/ai/chat', { method: 'POST', body: { messages: [{ role: 'user', content: `You are an interviewer. Question: ${q}\nCandidate answer: ${a}\nGive a score out of 10, 2 strengths, 2 improvements, and a model answer in 3-4 sentences.` }], temperature: 0.4, max_tokens: 1000 } });
+    r = await callBackend('/api/ai/chat', { method: 'POST', body: { messages: [{ role: 'user', content: `You are an interviewer. Question: ${q}\nCandidate answer: ${a}\nGive a score out of 10, 2 strengths, 2 improvements, and a model answer in 3-4 sentences.` }], temperature: 0.4, max_tokens: 1000 } });
   } catch (err) { $('mockFeedback').textContent = err.message; return; }
   if (r.status === 402) { showUpgrade(r.data?.message); $('mockFeedback').textContent = 'Plan limit reached — upgrade to continue.'; return; }
   $('mockFeedback').innerHTML = (r.status === 200 && r.data?.text)
@@ -609,7 +639,7 @@ function renderPlans() {
 async function subscribe(p) {
   $('planStatus').textContent = 'Creating a secure checkout…';
   let r;
-  try { r = await api('/api/subscriptions/checkout', { method: 'POST', body: { plan_slug: p.slug } }); }
+  try { r = await callBackend('/api/subscriptions/checkout', { method: 'POST', body: { plan_slug: p.slug } }); }
   catch (err) { $('planStatus').textContent = err.message; return; }
   if (r.status !== 200 || !r.data?.payment_session_id) { $('planStatus').textContent = 'Checkout failed: ' + apiError(r); return; }
   $('planStatus').textContent = 'Checkout opened — complete the payment, then your plan activates automatically.';
@@ -623,7 +653,7 @@ function pollSubscription() {
   pollTimer = setInterval(async () => {
     tries++;
     try {
-      const r = await api('/api/subscriptions/mine', {});
+      const r = await callBackend('/api/subscriptions/mine', {});
       if (r.status === 200 && r.data && r.data.status === 'active') {
         clearInterval(pollTimer);
         await refreshMe(); loadPlans();
@@ -640,7 +670,7 @@ $('btnRefreshPlan').addEventListener('click', async () => {
 });
 $('btnCancelPlan').addEventListener('click', async () => {
   let r;
-  try { r = await api('/api/subscriptions/cancel', { method: 'POST', body: {} }); }
+  try { r = await callBackend('/api/subscriptions/cancel', { method: 'POST', body: {} }); }
   catch (err) { $('planStatus').textContent = err.message; return; }
   if (r.status === 200) { $('planStatus').textContent = 'Subscription cancelled — you keep access until it expires.'; await refreshMe(); loadPlans(); }
   else $('planStatus').textContent = 'Cancel failed: ' + apiError(r);
@@ -650,7 +680,7 @@ $('btnCancelPlan').addEventListener('click', async () => {
 async function loadAdmin() {
   if (!isAdmin()) return;
   try {
-    const o = await api('/api/admin/overview', {});
+    const o = await callBackend('/api/admin/overview', {});
     if (o.status === 200) {
       const d = o.data;
       $('adminOverview').innerHTML = `
@@ -664,7 +694,7 @@ async function loadAdmin() {
   } catch {}
   let users = [];
   try {
-    const u = await api('/api/admin/users', {});
+    const u = await callBackend('/api/admin/users', {});
     if (u.status === 200 && Array.isArray(u.data)) {
       users = u.data;
       $('adminUsers').innerHTML = users.map((x) => `<tr>
@@ -678,14 +708,14 @@ async function loadAdmin() {
       </tr>`).join('') || '<tr><td colspan="7" class="muted">No users yet.</td></tr>';
       $('adminUsers').querySelectorAll('[data-role]').forEach((b) => b.addEventListener('click', async () => {
         const [id, role] = b.dataset.role.split('|');
-        const r = await api(`/api/admin/users/${id}`, { method: 'PATCH', body: { role } });
+        const r = await callBackend(`/api/admin/users/${id}`, { method: 'PATCH', body: { role } });
         if (r.status === 200) loadAdmin(); else $('grantStatus').textContent = 'Role change failed: ' + apiError(r);
       }));
       $('grantUser').innerHTML = users.map((x) => `<option value="${x.id}">${esc(x.name || x.email)} (${esc(x.email)})</option>`).join('');
     }
   } catch {}
   try {
-    const s = await api('/api/admin/subscriptions', {});
+    const s = await callBackend('/api/admin/subscriptions', {});
     if (s.status === 200 && Array.isArray(s.data)) {
       $('adminSubs').innerHTML = s.data.slice(0, 50).map((x) => `<tr>
         <td>${esc(x.user_email || x.email || ('#' + x.user_id))}</td>
@@ -698,7 +728,7 @@ async function loadAdmin() {
     }
   } catch {}
   try {
-    const p = await api('/api/admin/payments', {});
+    const p = await callBackend('/api/admin/payments', {});
     if (p.status === 200 && Array.isArray(p.data)) {
       $('adminPayments').innerHTML = p.data.slice(0, 50).map((x) => `<tr>
         <td>${esc(x.cf_order_id || '')}<br/><span class="muted">${esc(x.cf_payment_id || '')}</span></td>
@@ -711,7 +741,7 @@ async function loadAdmin() {
   } catch {}
   // Plans editor
   try {
-    const pl = await api('/api/admin/plans', {});
+    const pl = await callBackend('/api/admin/plans', {});
     if (pl.status === 200 && Array.isArray(pl.data)) {
       $('adminPlans').innerHTML = '';
       $('grantPlan').innerHTML = pl.data.map((x) => `<option value="${x.slug}">${esc(x.name)}</option>`).join('');
@@ -751,7 +781,7 @@ async function loadAdmin() {
             features: get('features').value.split(',').map((x) => x.trim()).filter(Boolean),
             active: get('active').checked,
           };
-          const r = await api(`/api/admin/plans/${encodeURIComponent(p.slug)}`, { method: 'PUT', body });
+          const r = await callBackend(`/api/admin/plans/${encodeURIComponent(p.slug)}`, { method: 'PUT', body });
           $('planEditStatus').textContent = r.status === 200 ? `Plan “${p.slug}” saved.` : 'Save failed: ' + apiError(r);
           if (r.status === 200) { loadPlans(); }
         });
@@ -761,7 +791,7 @@ async function loadAdmin() {
   } catch {}
   // Provider keys (masked) + models
   try {
-    const pr = await api('/api/admin/providers', {});
+    const pr = await callBackend('/api/admin/providers', {});
     if (pr.status === 200) {
       const d = pr.data;
       $('provDefault').value = d.default_provider || 'groq';
@@ -783,7 +813,7 @@ $('btnGrant').addEventListener('click', async () => {
   const plan = $('grantPlan').value;
   const days = Number($('grantDays').value || 0);
   if (!userId || !plan) { $('grantStatus').textContent = 'Pick a user and a plan.'; return; }
-  const r = await api(`/api/admin/users/${encodeURIComponent(userId)}/grant`, { method: 'POST', body: { plan_slug: plan, days: days || undefined } });
+  const r = await callBackend(`/api/admin/users/${encodeURIComponent(userId)}/grant`, { method: 'POST', body: { plan_slug: plan, days: days || undefined } });
   $('grantStatus').textContent = r.status === 200 ? `Granted ${plan} access.` : 'Grant failed: ' + apiError(r);
   if (r.status === 200) loadAdmin();
 });
@@ -797,7 +827,7 @@ $('btnNewPlan').addEventListener('click', async () => {
     sessions_limit: null, minutes_per_session: null, mock_limit: null,
     features: [], active: true, sort_order: plans.length + 1,
   };
-  const r = await api('/api/admin/plans', { method: 'POST', body });
+  const r = await callBackend('/api/admin/plans', { method: 'POST', body });
   $('planEditStatus').textContent = r.status === 200 || r.status === 201 ? `Plan “${slug}” created.` : 'Create failed: ' + apiError(r);
   if (r.status === 200 || r.status === 201) { $('newPlanSlug').value = ''; $('newPlanName').value = ''; $('newPlanPrice').value = ''; $('newPlanDays').value = ''; loadAdmin(); loadPlans(); }
 });
@@ -811,17 +841,35 @@ $('btnSaveProviders').addEventListener('click', async () => {
     const key = el.id.replace('provModel_', '');
     if (el.value.trim()) body[key] = el.value.trim();
   });
-  const r = await api('/api/admin/providers', { method: 'PUT', body });
+  const r = await callBackend('/api/admin/providers', { method: 'PUT', body });
   $('provStatus').textContent = r.status === 200 ? 'Provider settings saved.' : 'Save failed: ' + apiError(r);
   if (r.status === 200) loadAiStatus();
 });
 
-// ---- Boot: settings, then auth (token -> /api/auth/me) ----
+// ---- Boot: paint the login card instantly; session + server checks run in the background ----
 (async function boot() {
-  await loadSettings();
+  // If the preload bridge is missing, every button in the app silently
+  // does nothing — say so plainly instead of leaving a dead screen.
+  if (!window.api) { showBridgeError(); return; }
+  showAuth();
+  setAuthMode('login');
+  loadSettings().catch(() => {});
+  checkServer();
   try {
     const m = await window.api.apiCall('/api/auth/me', {});
-    if (m.status === 200 && m.data?.user) { enterApp(m.data); return; }
+    if (m.status === 200 && m.data?.user) { enterApp(m.data); }
   } catch {}
-  showAuth();
 })();
+function showBridgeError() {
+  $('authView').hidden = false;
+  $('app').hidden = true;
+  $('authError').textContent = 'The app did not start correctly (its internal bridge is missing). Please reinstall the latest version — your account and data are safe on the service.';
+}
+async function checkServer() {
+  const dot = $('serverDot'), txt = $('serverText');
+  try {
+    const r = await window.api.apiCall('/api/health', {});
+    if (r.status === 200) { dot.className = 'dot green'; txt.textContent = 'Server online'; }
+    else { dot.className = 'dot amber'; txt.textContent = 'Server waking up…'; }
+  } catch { dot.className = 'dot amber'; txt.textContent = 'Server unreachable — check your connection'; }
+}
